@@ -1,0 +1,85 @@
+{
+  "name": "@dwlf/indicators",
+  "version": "0.0.0-development",
+  "description": "Zero-dependency technical indicators for Node, browsers, and workers. Pure math — candles in, values out.",
+  "type": "module",
+  "main": "dist/index.cjs",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "lint": "eslint .",
+    "format": "prettier -w .",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "pnpm run build && pnpm run test && pnpm run typecheck",
+    "prepare": "husky install",
+    "release": "semantic-release",
+    "commitlint": "commitlint --edit"
+  },
+  "keywords": [
+    "technical-indicators",
+    "typescript",
+    "trading",
+    "finance",
+    "bollinger-bands",
+    "ema",
+    "sma",
+    "dss",
+    "fibonacci",
+    "support-resistance",
+    "trendline",
+    "swing",
+    "dwlf"
+  ],
+  "author": "DWLF <hello@dwlf.co.uk>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/andywilliams/dwlf-indicators-oss.git"
+  },
+  "bugs": {
+    "url": "https://github.com/andywilliams/dwlf-indicators-oss/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "packageManager": "pnpm@9.12.0",
+  "devDependencies": {
+    "@commitlint/cli": "^19.5.0",
+    "@commitlint/config-conventional": "^19.5.0",
+    "@semantic-release/commit-analyzer": "^13.0.0",
+    "@semantic-release/github": "^10.1.4",
+    "@semantic-release/npm": "^13.1.1",
+    "@semantic-release/release-notes-generator": "^14.0.1",
+    "@types/node": "^20.16.10",
+    "eslint": "^8.57.0",
+    "eslint-plugin-vitest": "^0.5.4",
+    "husky": "^9.1.6",
+    "prettier": "^3.3.3",
+    "semantic-release": "^23.1.1",
+    "tsup": "^8.2.4",
+    "typescript": "^5.6.3",
+    "typescript-eslint": "^7.18.0",
+    "vitest": "^2.1.3"
+  }
+}
