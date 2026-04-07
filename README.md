@@ -23,14 +23,14 @@ const candles: Candle[] = [
   // ...
 ];
 
-// Compute indicators
-const ema8 = EMA.computeEMA(candles, 8);
+// Compute indicators — all functions take (candles, optionalParams)
+const ema8 = EMA.computeEMA(candles, { length: 8 });
 const dss = DSS.computeDSS(candles, { length: 10, smooth1: 9, signal: 5 });
 const bb = Bollinger.computeBollingerBands(candles, { length: 20, standardDeviation: 2 });
 
 // Detect events
 const dssEvents = DSS.detectEvents(candles);
-const emaEvents = EMA.detectEvents(candles, 8);
+const emaEvents = EMA.detectEvents(candles, { length: 8 });
 ```
 
 ## Indicators
