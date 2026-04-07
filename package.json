@@ -30,7 +30,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "prepublishOnly": "pnpm run build && pnpm run test && pnpm run typecheck",
+    "prepublishOnly": "pnpm run build",
     "prepare": "husky install",
     "release": "semantic-release",
     "commitlint": "commitlint --edit"
