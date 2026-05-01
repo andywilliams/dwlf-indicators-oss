@@ -52,6 +52,12 @@ export type SupportResistanceLevel = {
   tier?: LevelTier;
   strength?: LevelStrength;
   state?: 'active' | 'tested' | 'broken' | 'flipped' | 'expired';
+  /** Index of the first touch that formed this level */
+  formationIndex?: number;
+  /** Index of the most recent touch */
+  lastTouchIndex?: number;
+  /** All touch indices sorted chronologically */
+  touchIndices?: number[];
   history?: {
     originalSide: 'support' | 'resistance';
     breakIndex?: number;
@@ -500,6 +506,13 @@ const clusterLevels = (
 
       const roundedLevel = Number(cluster.level.toFixed(4));
 
+      // Sort touch indices chronologically so consumers can render the level
+      // as a line bounded by where it actually formed and where it was last touched,
+      // rather than a full-width horizontal line.
+      const sortedIndices = [...cluster.touchIndices].sort((a, b) => a - b);
+      const formationIndex = sortedIndices[0];
+      const lastTouchIndex = sortedIndices[sortedIndices.length - 1];
+
       const level: SupportResistanceLevel = {
         level: roundedLevel,
         touches: cluster.touches,
@@ -522,6 +535,9 @@ const clusterLevels = (
           tierBonus,
           overall,
         },
+        formationIndex,
+        lastTouchIndex,
+        touchIndices: sortedIndices,
       };
 
       if (useTiers) {

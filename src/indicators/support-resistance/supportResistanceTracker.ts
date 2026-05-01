@@ -173,6 +173,13 @@ export class SupportResistanceTracker {
           level.state = 'active';
           if (bouncedCorrectly) {
             level.touches += 1;
+            // Keep positional metadata in sync so consumers rendering bounded
+            // line segments see the line extend to the most recent interaction.
+            level.touchIndices = [...(level.touchIndices ?? []), this.candleIndex];
+            level.lastTouchIndex = this.candleIndex;
+            if (level.formationIndex === undefined) {
+              level.formationIndex = level.touchIndices[0];
+            }
             if (level.strength) {
               level.strength.touchCount = level.touches;
             }
@@ -211,11 +218,11 @@ export class SupportResistanceTracker {
     return events;
   }
 
-  getActiveLevels(): SupportResistanceLevel[] {
+  getActiveLevels(): TrackedLevel[] {
     return this.levels.filter(l => l.state === 'active' || l.state === 'tested');
   }
 
-  getAllLevels(): SupportResistanceLevel[] {
+  getAllLevels(): TrackedLevel[] {
     return [...this.levels];
   }
 
@@ -276,6 +283,21 @@ export class SupportResistanceTracker {
             ...detected.strength,
             touchCount: Math.max(existing.strength?.touchCount ?? 0, detected.strength.touchCount),
           };
+        }
+        // Merge positional metadata. The detection scan covers the full candle
+        // history and may find swing-point touches the tracker never observed
+        // (touches before the level was first detected, or that didn't trigger
+        // a bounce confirmation). Union with tracker-recorded indices so
+        // formationIndex/lastTouchIndex stay accurate as the level evolves.
+        if (detected.touchIndices?.length || existing.touchIndices?.length) {
+          const merged = new Set<number>([
+            ...(existing.touchIndices ?? []),
+            ...(detected.touchIndices ?? []),
+          ]);
+          const sorted = [...merged].sort((a, b) => a - b);
+          existing.touchIndices = sorted;
+          existing.formationIndex = sorted[0];
+          existing.lastTouchIndex = sorted[sorted.length - 1];
         }
       } else {
         // New level
