@@ -375,6 +375,52 @@ describe('SupportResistanceTracker', () => {
     }
   });
 
+  it('should keep formationIndex/lastTouchIndex/touchIndices fresh through redetection and bounces', () => {
+    const tracker = new SupportResistanceTracker({
+      maxLevelsPerSide: 5,
+      minTouches: 2,
+      redetectInterval: 10,
+      expiryBars: 500,
+    });
+
+    // Build up enough touches to register a level, then keep feeding bounces.
+    const candles = generateBounceOffSupport(6, 100, 5);
+    for (const c of candles) {
+      tracker.update(c);
+    }
+
+    const levels = tracker.getAllLevels();
+    expect(levels.length).toBeGreaterThan(0);
+
+    for (const level of levels) {
+      expect(Array.isArray(level.touchIndices)).toBe(true);
+      expect(level.touchIndices!.length).toBeGreaterThan(0);
+      expect(level.formationIndex).toBe(level.touchIndices![0]);
+      expect(level.lastTouchIndex).toBe(level.touchIndices![level.touchIndices!.length - 1]);
+      // Indices stay chronologically sorted as bounce/redetect updates land.
+      for (let i = 1; i < level.touchIndices!.length; i++) {
+        expect(level.touchIndices![i]).toBeGreaterThanOrEqual(level.touchIndices![i - 1]);
+      }
+      // lastTouchIndex must reflect interactions seen well after initial detection,
+      // not stay frozen at the formation cluster's last swing.
+      expect(level.lastTouchIndex!).toBeGreaterThanOrEqual(level.formationIndex!);
+    }
+
+    // After more candles + a bounce, lastTouchIndex must advance.
+    const before = levels[0];
+    const beforeLast = before.lastTouchIndex!;
+    const startIdx = candles.length;
+    // Simulate touch + bounce: dip into the support zone, then close above the upper band.
+    const touchPrice = before.zone!.center;
+    const bouncePrice = before.zone!.upper + 5;
+    tracker.update(makeCandle(startIdx, touchPrice, touchPrice + 1, touchPrice - 1, touchPrice));
+    tracker.update(makeCandle(startIdx + 1, bouncePrice, bouncePrice + 1, bouncePrice - 1, bouncePrice));
+
+    const after = tracker.getAllLevels().find((l) => Math.abs(l.level - before.level) < 1);
+    expect(after).toBeDefined();
+    expect(after!.lastTouchIndex!).toBeGreaterThan(beforeLast);
+  });
+
   it('should handle undefined options without overriding defaults', () => {
     const tracker8 = new SupportResistanceTracker({
       breakThresholdAtrMultiple: undefined,
