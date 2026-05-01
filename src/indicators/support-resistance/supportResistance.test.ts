@@ -108,6 +108,21 @@ describe('supportResistance new fields', () => {
       expect(typeof lvl.extremityMultiplier).toBe('number');
     }
   });
+
+  it('exposes formationIndex, lastTouchIndex, and chronologically-sorted touchIndices', () => {
+    const result = detectSupportResistance(candles, { minTouches: 1, maxLevelsPerSide: 10 });
+    const levels = [...result.support, ...result.resistance];
+    expect(levels.length).toBeGreaterThan(0);
+    for (const lvl of levels) {
+      expect(Array.isArray(lvl.touchIndices)).toBe(true);
+      expect(lvl.touchIndices!.length).toBeGreaterThan(0);
+      expect(lvl.formationIndex).toBe(lvl.touchIndices![0]);
+      expect(lvl.lastTouchIndex).toBe(lvl.touchIndices![lvl.touchIndices!.length - 1]);
+      for (let i = 1; i < lvl.touchIndices!.length; i++) {
+        expect(lvl.touchIndices![i]).toBeGreaterThanOrEqual(lvl.touchIndices![i - 1]);
+      }
+    }
+  });
 });
 
 describe('support/resistance events', () => {
