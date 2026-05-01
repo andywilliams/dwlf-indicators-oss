@@ -211,11 +211,11 @@ export class SupportResistanceTracker {
     return events;
   }
 
-  getActiveLevels(): SupportResistanceLevel[] {
+  getActiveLevels(): TrackedLevel[] {
     return this.levels.filter(l => l.state === 'active' || l.state === 'tested');
   }
 
-  getAllLevels(): SupportResistanceLevel[] {
+  getAllLevels(): TrackedLevel[] {
     return [...this.levels];
   }
 

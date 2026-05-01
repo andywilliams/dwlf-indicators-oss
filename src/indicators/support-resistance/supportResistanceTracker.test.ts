@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { SupportResistanceTracker } from './supportResistanceTracker';
-import type { TrackedLevel, TrackerOptions } from './supportResistanceTracker';
+import type { TrackerOptions } from './supportResistanceTracker';
 import type { Candle, IndicatorEvent } from '../../types';
 
 // --- Helpers ---
@@ -149,7 +149,7 @@ describe('SupportResistanceTracker', () => {
     for (const c of candles) {
       tracker.update(c);
     }
-    const active = tracker.getActiveLevels() as TrackedLevel[];
+    const active = tracker.getActiveLevels();
     const all = tracker.getAllLevels();
     expect(active.length).toBeLessThanOrEqual(all.length);
     for (const l of active) {
@@ -163,7 +163,7 @@ describe('SupportResistanceTracker', () => {
     for (const c of candles) {
       allEvents.push(...tracker.update(c));
     }
-    const active = tracker.getActiveLevels() as TrackedLevel[];
+    const active = tracker.getActiveLevels();
     // Broken levels should not appear in active
     for (const l of active) {
       expect(l.state).not.toBe('broken');
@@ -261,7 +261,7 @@ describe('SupportResistanceTracker', () => {
     for (const c of candles) {
       tracker.update(c);
     }
-    for (const l of tracker.getAllLevels() as TrackedLevel[]) {
+    for (const l of tracker.getAllLevels()) {
       expect(l.state).toBeDefined();
       expect(['active', 'tested', 'broken', 'flipped', 'expired']).toContain(l.state);
     }
@@ -284,7 +284,7 @@ describe('SupportResistanceTracker', () => {
     }
 
     // Verify we have some levels tracked
-    const levelsBefore = tracker4.getAllLevels() as TrackedLevel[];
+    const levelsBefore = tracker4.getAllLevels();
     const supportLevels = levelsBefore.filter(l => l.side === 'support' && l.state === 'active');
 
     if (supportLevels.length > 0) {
@@ -355,7 +355,7 @@ describe('SupportResistanceTracker', () => {
       tracker7.update(c);
     }
 
-    const levelsBefore = tracker7.getAllLevels() as TrackedLevel[];
+    const levelsBefore = tracker7.getAllLevels();
     const touchesBefore = levelsBefore.map(l => ({ level: l.level, touches: l.touches, state: l.state }));
 
     // Add more candles to trigger redetection
@@ -365,7 +365,7 @@ describe('SupportResistanceTracker', () => {
       tracker7.update(makeCandle(idx++, price, price + 0.5, price - 0.5, price));
     }
 
-    const levelsAfter = tracker7.getAllLevels() as TrackedLevel[];
+    const levelsAfter = tracker7.getAllLevels();
     // For any level that existed before, touches should not decrease
     for (const before of touchesBefore) {
       const after = levelsAfter.find(l => Math.abs(l.level - before.level) < 1);
@@ -416,7 +416,7 @@ describe('SupportResistanceTracker', () => {
     }
 
     // Broken levels should have expired
-    const expiredLevels = (tracker9.getAllLevels() as TrackedLevel[]).filter(l => l.state === 'expired');
+    const expiredLevels = (tracker9.getAllLevels()).filter(l => l.state === 'expired');
     // At least one level should have expired (either from active or broken state)
     expect(expiredLevels.length).toBeGreaterThan(0);
   });
@@ -437,7 +437,7 @@ describe('SupportResistanceTracker', () => {
     }
 
     // Find a support level
-    const supportLevels = (tracker10.getAllLevels() as TrackedLevel[]).filter(l => l.side === 'support' && l.state === 'active');
+    const supportLevels = (tracker10.getAllLevels()).filter(l => l.side === 'support' && l.state === 'active');
     if (supportLevels.length === 0) return; // skip if no levels detected yet
 
     const touchesBefore = supportLevels[0].touches;
@@ -450,7 +450,7 @@ describe('SupportResistanceTracker', () => {
     // Exit below zone (wrong direction for support bounce)
     tracker10.update(makeCandle(idx++, 99.5, 99.8, 98, 98.5));
 
-    const levelAfter = (tracker10.getAllLevels() as TrackedLevel[]).find(l => l.id === supportLevels[0].id);
+    const levelAfter = (tracker10.getAllLevels()).find(l => l.id === supportLevels[0].id);
     // Touch count should not have increased from a downward exit
     if (levelAfter && levelAfter.state === 'active') {
       // If it didn't break decisively, it should not count as a bounce
@@ -475,7 +475,7 @@ describe('SupportResistanceTracker', () => {
     }
 
     // Check that any flipped level has history
-    const flipped = (tracker3.getAllLevels() as TrackedLevel[]).filter(l => l.history && l.history.flipCount > 0);
+    const flipped = (tracker3.getAllLevels()).filter(l => l.history && l.history.flipCount > 0);
     for (const l of flipped) {
       expect(l.history!.originalSide).toBeDefined();
       expect(l.history!.flipCount).toBeGreaterThan(0);
@@ -543,7 +543,7 @@ describe('SupportResistanceTracker', () => {
     }
 
     // Count levels near 100
-    const allLevels = tracker.getAllLevels() as TrackedLevel[];
+    const allLevels = tracker.getAllLevels();
     const nearHundred = allLevels.filter(l => l.zone && Math.abs(l.zone.center - 100) < 2);
     // Should not have duplicates at the same price zone
     const activeSides = nearHundred.filter(l => l.state !== 'expired').map(l => `${l.side}_${l.zone!.center.toFixed(1)}`);
