@@ -1,4 +1,5 @@
 import type { Candle, IndicatorEvent } from '../../types';
+import { atr as wilderAtr } from '../../math/atr';
 import { computeSwings } from '../swing/swing';
 import type { SwingHigh, SwingLow } from '../swing/swing';
 import { assertPositiveInteger, isFiniteNumber } from '../../utils/guards';
@@ -196,40 +197,6 @@ const normaliseCandles = (candles: Candle[]): NormalisedCandle[] =>
 
 const toNumber = (value: number | undefined): number | undefined =>
   value === undefined || value === null ? undefined : Number(value);
-
-const computeAtrSeries = (candles: NormalisedCandle[], period: number): Array<number | undefined> => {
-  const atr = new Array<number | undefined>(candles.length).fill(undefined);
-  if (!candles.length) {
-    return atr;
-  }
-
-  const trueRanges: number[] = [];
-
-  for (let i = 0; i < candles.length; i += 1) {
-    const current = candles[i];
-    const prevClose = i > 0 ? candles[i - 1].c : current.c;
-    const highLow = current.h - current.l;
-    const highPrev = Math.abs(current.h - prevClose);
-    const lowPrev = Math.abs(current.l - prevClose);
-    const tr = Math.max(highLow, highPrev, lowPrev);
-    trueRanges.push(tr);
-
-    if (i + 1 < period) {
-      continue;
-    }
-
-    if (i + 1 === period) {
-      const sum = trueRanges.reduce((acc, value) => acc + value, 0);
-      atr[i] = sum / period;
-      continue;
-    }
-
-    const previousAtr = atr[i - 1];
-    atr[i] = previousAtr !== undefined ? ((previousAtr * (period - 1)) + tr) / period : tr;
-  }
-
-  return atr;
-};
 
 const getAtrAt = (atrSeries: Array<number | undefined>, index: number): number => {
   const direct = atrSeries[index];
@@ -778,7 +745,7 @@ export const computeTrendlines = (
     return { trendlines: [], params: resolved };
   }
 
-  const atrSeries = computeAtrSeries(normalised, resolved.atrPeriod);
+  const atrSeries = wilderAtr(normalised, resolved.atrPeriod);
   const { highs, lows } = computeSwings(normalised, { lookback: resolved.swingLookback });
 
   const supportTrendlines = generateTrendlinesForDirection({
