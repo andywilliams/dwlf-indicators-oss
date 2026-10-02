@@ -90,13 +90,14 @@ const toPercentOfClose = (candles: Candle[], values: Array<number | undefined>):
  * Percentile rank (0-100) of each value within the trailing `window` values
  * ending at it, by midrank: values below count fully and ties (the value
  * itself included) count half, so a flat window ranks 50, not 100.
- * Gaps (non-finite values) are left out of the ranking; a bar's rank is
- * undefined until `window` bars have passed, or while fewer than half the
- * window's values are finite.
+ * A bar's rank is undefined until a full window has passed since the first
+ * finite value (so warm-up is never ranked), and while fewer than half the
+ * window's values are finite. Later gaps are left out of the ranking.
  */
-const trailingPercentileRank = (values: Array<number | undefined>, window: number): Array<number | undefined> =>
-  values.map((value, i) => {
-    if (!isFiniteNumber(value) || i + 1 < window) {
+const trailingPercentileRank = (values: Array<number | undefined>, window: number): Array<number | undefined> => {
+  const first = values.findIndex((v) => isFiniteNumber(v));
+  return values.map((value, i) => {
+    if (!isFiniteNumber(value) || first < 0 || i - window + 1 < first) {
       return undefined;
     }
     let below = 0;
@@ -119,6 +120,7 @@ const trailingPercentileRank = (values: Array<number | undefined>, window: numbe
     }
     return ((below + ties / 2) / counted) * 100;
   });
+};
 
 export type AtrResult = {
   atr: LinePoint[];

@@ -107,6 +107,13 @@ describe('detectEvents', () => {
     expect(detectEvents(spanCandles(Array.from({ length: 30 }, () => 1)), params)).toEqual([]);
   });
 
+  it('ranks no bar whose window reaches back into the ATR warm-up', () => {
+    // length 2 => first ATR at index 1; window 10 => first rank at index 10.
+    // A burst at index 9 is inside the warm-up window and must not fire.
+    const spans = [...Array.from({ length: 9 }, () => 1), 9, 9, 9];
+    expect(detectEvents(spanCandles(spans), params)).toEqual([]);
+  });
+
   it('emits nothing until the percentile window is full', () => {
     expect(detectEvents(spanCandles([1, 1, 1, 9, 9]), params)).toEqual([]);
   });
