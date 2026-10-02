@@ -24,6 +24,19 @@ export type BollingerParams = {
   offset?: number;
 };
 
+export type AtrParams = {
+  /** Wilder smoothing period. */
+  length?: number;
+  /** Trailing bars the ATR% percentile is ranked against. */
+  percentileWindow?: number;
+  /** Percentile (0-100, exclusive) whose upward crossing fires `atr.regime.expansion`. */
+  expansionPercentile?: number;
+  /** Percentile (0-100, exclusive) whose downward crossing fires `atr.regime.contraction`. */
+  contractionPercentile?: number;
+  /** Percentile an episode must return past before its event can fire again. */
+  episodeResetPercentile?: number;
+};
+
 export type DssParams = {
   length?: number;
   smooth1?: number;

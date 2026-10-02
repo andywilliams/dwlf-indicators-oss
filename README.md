@@ -40,6 +40,7 @@ const emaEvents = EMA.detectEvents(candles, { length: 8 });
 | `DSS` | Double Smoothed Stochastic (Bressert) |
 | `DSSState` | Streaming DSS state tracking |
 | `Bollinger` | Bollinger Bands (upper, middle, lower, %B, bandwidth) |
+| `ATR` | Wilder Average True Range and ATR% of close; `atr.regime.expansion` / `atr.regime.contraction` events when the ATR% percentile over a trailing window (default 100 bars) reaches the top (80) or bottom (20) band, once per episode until it returns past the reset percentile (50) |
 | `EMA` | Exponential Moving Average with event detection |
 | `SMA` | Simple Moving Average with event detection |
 | `EMACloud` | EMA cloud/ribbon (alignment, cloud hit) |
@@ -57,7 +58,7 @@ const emaEvents = EMA.detectEvents(candles, { length: 8 });
 Low-level building blocks, also exported:
 
 ```typescript
-import { ema, sma, rollingHighest, rollingLowest, standardDeviation } from '@dwlf/indicators';
+import { ema, sma, atr, trueRange, rollingHighest, rollingLowest, standardDeviation } from '@dwlf/indicators';
 ```
 
 ## API Pattern
