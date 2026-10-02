@@ -60,15 +60,27 @@ export const resolveAtrParams = (params: AtrParams = {}): ResolvedAtrParams => {
       'Percentiles must satisfy contractionPercentile < episodeResetPercentile < expansionPercentile.',
     );
   }
+  // Midrank counts the current value as half a tie, so a full window ranks
+  // between 50/window and 100 - 50/window; a threshold outside that never fires.
+  const edge = 50 / resolved.percentileWindow;
+  if (resolved.expansionPercentile > 100 - edge || resolved.contractionPercentile < edge) {
+    throw new TypeError(
+      `With percentileWindow ${resolved.percentileWindow}, thresholds must lie within [${edge}, ${100 - edge}].`,
+    );
+  }
 
   return resolved;
 };
 
-/** ATR as a percent of each candle's close. */
+/**
+ * ATR as a percent of each candle's close. Undefined for a non-positive
+ * close: a negative divisor would invert the ranking, so instruments that can
+ * print negative prices get no percent (and no regime events) on those bars.
+ */
 const toPercentOfClose = (candles: Candle[], values: Array<number | undefined>): Array<number | undefined> =>
   values.map((value, i) => {
     const close = candles[i].c;
-    if (!isFiniteNumber(value) || !isFiniteNumber(close) || close === 0) {
+    if (!isFiniteNumber(value) || !isFiniteNumber(close) || close <= 0) {
       return undefined;
     }
     return (value / close) * 100;
@@ -78,7 +90,9 @@ const toPercentOfClose = (candles: Candle[], values: Array<number | undefined>):
  * Percentile rank (0-100) of each value within the trailing `window` values
  * ending at it, by midrank: values below count fully and ties (the value
  * itself included) count half, so a flat window ranks 50, not 100.
- * Undefined until the window is full of finite values.
+ * Gaps (non-finite values) are left out of the ranking; a bar's rank is
+ * undefined until `window` bars have passed, or while fewer than half the
+ * window's values are finite.
  */
 const trailingPercentileRank = (values: Array<number | undefined>, window: number): Array<number | undefined> =>
   values.map((value, i) => {
@@ -87,18 +101,23 @@ const trailingPercentileRank = (values: Array<number | undefined>, window: numbe
     }
     let below = 0;
     let ties = 0;
+    let counted = 0;
     for (let j = i - window + 1; j <= i; j += 1) {
       const other = values[j];
       if (!isFiniteNumber(other)) {
-        return undefined;
+        continue;
       }
+      counted += 1;
       if (other < value) {
         below += 1;
       } else if (other === value) {
         ties += 1;
       }
     }
-    return ((below + ties / 2) / window) * 100;
+    if (counted * 2 < window) {
+      return undefined;
+    }
+    return ((below + ties / 2) / counted) * 100;
   });
 
 export type AtrResult = {
@@ -156,8 +175,8 @@ export const detectEvents = (candles: Candle[], params?: AtrParams): IndicatorEv
     const rank = ranks[i];
     const value = values[i];
     const percent = percents[i];
+    // A bar without a rank is skipped; the episode carries across the gap.
     if (!isFiniteNumber(rank) || !isFiniteNumber(value) || !isFiniteNumber(percent)) {
-      episode = undefined;
       continue;
     }
 

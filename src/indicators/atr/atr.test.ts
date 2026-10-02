@@ -116,5 +116,24 @@ describe('detectEvents', () => {
     expect(() => resolveAtrParams({ expansionPercentile: 100 })).toThrow(TypeError);
     expect(() => resolveAtrParams({ percentileWindow: 1 })).toThrow(TypeError);
     expect(() => resolveAtrParams({ episodeResetPercentile: 85 })).toThrow(TypeError);
+    // A 2-bar window ranks only 25 / 50 / 75: the default thresholds are unreachable.
+    expect(() => resolveAtrParams({ percentileWindow: 2 })).toThrow(/thresholds must lie within/);
+  });
+
+  it('treats a non-positive close as a gap rather than inverting ATR%', () => {
+    const spans = [...Array.from({ length: 12 }, () => 1), 8, 8];
+    const candles = spanCandles(spans);
+    candles[13] = { ...candles[13], c: -100 };
+    const events = detectEvents(candles, params);
+    expect(events.map((e) => e.id)).toEqual(['atr.regime.expansion']);
+    expect(events[0].index).toBe(12);
+  });
+
+  it('keeps detecting through a single bad candle', () => {
+    const spans = [...Array.from({ length: 12 }, () => 1), ...Array.from({ length: 4 }, () => 1), 8, 8];
+    const candles = spanCandles(spans);
+    candles[13] = { ...candles[13], c: Number.NaN };
+    const ids = detectEvents(candles, params).map((e) => e.id);
+    expect(ids).toEqual(['atr.regime.expansion']);
   });
 });
