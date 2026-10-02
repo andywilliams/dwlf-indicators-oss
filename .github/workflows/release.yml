@@ -13,26 +13,51 @@ jobs:
       contents: write
       issues: write
       pull-requests: write
-      id-token: write # npm OIDC trusted publishing; no long-lived NPM_TOKEN
+      # Mints the short-lived OIDC token npm exchanges for publish rights. Without
+      # it there is no credential at all: the job holds no npm token.
+      #
+      # npm's trusted-publisher record for @dwlf/indicators names this repository and
+      # THIS FILE'S NAME, `release.yml`, matched exactly. Renaming it, or moving this
+      # job into a called workflow under a different name, revokes publishing until
+      # the record on npm is updated to match. See RELEASING.md.
+      #
+      # The permission is job-scoped: every step below can reach the ID-token
+      # endpoint, which is why the install runs with --ignore-scripts.
+      id-token: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      # semantic-release 25 and @semantic-release/npm 13 require ^22.14.0 || >= 24.10.0.
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
 
+      # The plugin publishes with the first `npm` on PATH (no local npm here), and
+      # only npm >= 11.5.1 can publish over OIDC. Pinned exactly.
       - name: Upgrade npm to a version that supports trusted publishing
         run: npm install -g npm@11.5.1
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
 
+      # --ignore-scripts because every step here can exchange the ID token for
+      # publish rights on @dwlf/indicators; a dependency lifecycle script would not
+      # need semantic-release to push a tarball.
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Check this tree can publish via trusted publishing
+        run: node .github/scripts/check-trusted-publishing.mjs
+
+      # semantic-release pushes the tag BEFORE publishing, and `npm publish` builds
+      # through `prepublishOnly`. Building first turns a broken build into a failure
+      # before any tag exists, instead of a stranded tag with nothing on npm.
+      - name: Build
+        run: pnpm run build
 
       - name: Release
         env:
