@@ -10,6 +10,7 @@ export default tseslint.config(
       'commitlint.config.cjs',
       'release.config.cjs',
       '.husky',
+      '.github',
       'scripts',
       '*.cjs',
     ],
