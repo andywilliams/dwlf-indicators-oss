@@ -31,22 +31,20 @@ jobs:
           fetch-depth: 0
 
       # semantic-release 25 and @semantic-release/npm 13 require ^22.14.0 || >= 24.10.0.
+      # Node 24.10+ bundles npm >= 11.6, which can publish over OIDC (>= 11.5.1);
+      # the preflight below checks it.
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 24
 
-      # The plugin publishes with the first `npm` on PATH (no local npm here), and
-      # only npm >= 11.5.1 can publish over OIDC. Pinned exactly.
-      - name: Upgrade npm to a version that supports trusted publishing
-        run: npm install -g npm@11.5.1
-
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
 
-      # --ignore-scripts because every step here can exchange the ID token for
-      # publish rights on @dwlf/indicators; a dependency lifecycle script would not
-      # need semantic-release to push a tarball.
+      # Every step here can exchange the ID token for publish rights on
+      # @dwlf/indicators. --ignore-scripts removes dependency install scripts from
+      # that set; the build toolchain and semantic-release's plugins still run with
+      # it, as they do in dwlf-charting-oss.
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --ignore-scripts
 

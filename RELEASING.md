@@ -23,16 +23,19 @@ Before editing anything in `.github/`:
 - **`id-token: write` is part of the credential.** Without it the job cannot
   authenticate at all.
 - **The npm plugin and the npm binary both have to support OIDC.**
-  - `semantic-release` loads `@semantic-release/npm` from its own dependency tree,
-    and only v13+ establishes the OIDC context.
+  - `semantic-release` loads its plugins from its own dependency tree (under pnpm,
+    from its real path in `.pnpm`), so there are no root pins for them. Only
+    `@semantic-release/npm` v13+ establishes the OIDC context; semantic-release 25
+    brings it, and v23 brought v12.
   - That plugin shells out to `npm publish` with execa `preferLocal`. This repo has
-    no local npm, so the binary that runs is the first `npm` on PATH. The workflow
-    upgrades the runner's npm to 11.5.1, the first version that can publish over OIDC.
+    no local npm, so the binary that runs is the first `npm` on PATH: the one bundled
+    with Node 24 (>= 11.6). npm 11.5.1 is the first version that can publish over OIDC.
   - `.github/scripts/check-trusted-publishing.mjs` runs before `semantic-release` and
     refuses the release if either has drifted. Otherwise both failures show up as an
     authentication error at the registry, which reads like a credential problem.
-- **The install runs with `--ignore-scripts`**, because every step in the job can
-  exchange the ID token for publish rights.
+- **The install runs with `--ignore-scripts`.** Every step in the job can exchange the
+  ID token for publish rights. This keeps dependency install scripts out of that set,
+  but the build toolchain and semantic-release's plugins still run inside the job.
 - **A fork can never publish.** Workflows triggered from a fork cannot mint this
   repository's OIDC token.
 

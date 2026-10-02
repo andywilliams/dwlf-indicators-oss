@@ -67,10 +67,6 @@
   "devDependencies": {
     "@commitlint/cli": "^19.5.0",
     "@commitlint/config-conventional": "^19.5.0",
-    "@semantic-release/commit-analyzer": "^13.0.0",
-    "@semantic-release/github": "^10.1.4",
-    "@semantic-release/npm": "^13.1.1",
-    "@semantic-release/release-notes-generator": "^14.0.1",
     "@types/node": "^20.16.10",
     "eslint": "^8.57.0",
     "eslint-plugin-vitest": "^0.5.4",

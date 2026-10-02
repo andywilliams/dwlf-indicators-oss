@@ -14,7 +14,7 @@
 //   2. That plugin publishes by shelling out to `npm publish` through execa with
 //      `preferLocal: true`, which prepends node_modules/.bin to PATH. This repo has
 //      no local npm, so the binary that authenticates is the first `npm` on PATH
-//      (release.yml upgrades the runner's), unless a dependency starts providing
+//      (the one bundled with Node 24), unless a dependency starts providing
 //      node_modules/.bin/npm. Only npm >= 11.5.1 can publish over OIDC.
 //
 // Either failure would otherwise surface as an authentication error at the registry,
