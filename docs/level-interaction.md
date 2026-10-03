@@ -33,7 +33,8 @@ type LevelInput = {
 
 trackLevelInteractions(candles, levels, { idPrefix, ...params })
   => { events: IndicatorEvent<LevelEventPayload>[]; states: LevelState[] }
-getEventDefinitions(idPrefix, label) => IndicatorEventDefinition[]
+eventDefinitionsFor(idPrefix, label) => IndicatorEventDefinition[]
+getEventDefinitions() => []   // the zero-argument contract every module keeps; this one has no prefix of its own
 keepNearestApproaches(events) => events   // optional consumer-side filter
 LEVEL_EVENT_KINDS                          // the fixed, published list of kinds
 ```
@@ -63,7 +64,7 @@ at that bar (from `math/atr`):
 - `sloped`: `anchorPrice + slopePerBar·(i − anchorIndex) ± touchAtr·ATR`
 - `zone`: `[lower, upper]` as given (no widening)
 
-Before ATR exists (warm-up) no event except `formed` fires.
+Before ATR exists (warm-up) no interaction is judged; only `formed` and `expired` can fire.
 
 ## Events and the state machine
 
@@ -78,13 +79,13 @@ Per bar, in this order:
 |---|---|---|
 | `formed` | `i == knowableIndex` | role confirmed, phase away |
 | `broken` | close is beyond, and not a reclaim | role ← opposite, **unconfirmed**; remember the break bar |
-| `reclaimed` | close is beyond while the role is unconfirmed and `i − breakBar ≤ reclaimBars` (a failed break) | role ← opposite (the original), confirmed |
+| `reclaimed` | close is beyond within `reclaimBars` of the last break (a failed break), even if a quick retest already flipped the role | role ← opposite (the original), confirmed |
 | `tested` | phase away → touching, role confirmed | count the touch |
 | `retested` | phase away → touching, role unconfirmed (first return after a break) | |
 | `rejected` | phase touching → away, role confirmed (the level held) | |
 | `flipped` | phase touching → away, role unconfirmed (the old level held from the other side) | role confirmed |
 | `approached` | phase away, close within `approachAtr·ATR` of the band's near edge, no approach episode open | open an approach episode |
-| `expired` | no touch/break for `expiryBars`, or `i > endIndex` | stop tracking |
+| `expired` | at the close of the `expiryBars`-th bar without a touch or break, or of `endIndex` | stop tracking |
 
 A break that is not reclaimed within `reclaimBars` and later comes back through is an ordinary
 `broken` of the provisional role.
@@ -101,7 +102,9 @@ A break that is not reclaimed within `reclaimBars` and later comes back through 
 - **Re-arming after a hold.** After `rejected` or `flipped`, a new touch episode needs the close
   to move more than `touchResetAtr·ATR` away from the band first. Until then, touches are the
   same episode continuing (price hovering at the level) and fire nothing; a break still fires.
-  The approach episode also stays open until `approachResetAtr`. Without this rule, a market
+  The hold bar's own close counts: if it is already beyond `touchResetAtr`, the next touch is a
+  new episode. The approach episode stays open until `approachResetAtr`, and also after a break,
+  since price has just come through the level. Without this rule, a market
   that wicks into a level bar after bar fires tested + rejected on every bar (BTC under 79.6k,
   21 Aug to 1 Sep 2026: 8 pairs in 12 days).
 - **formed** and **expired** fire once per level.

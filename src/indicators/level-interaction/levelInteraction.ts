@@ -165,7 +165,11 @@ const assertPrefix = (idPrefix: string): void => {
   }
 };
 
-export const getEventDefinitions = (idPrefix: string, label: string): IndicatorEventDefinition[] => {
+/**
+ * The event definitions for one consumer's prefix, e.g. `eventDefinitionsFor('keyLevel', 'Key Level')`.
+ * Consumers register these under their own module in the platform's registry.
+ */
+export const eventDefinitionsFor = (idPrefix: string, label: string): IndicatorEventDefinition[] => {
   assertPrefix(idPrefix);
   return LEVEL_EVENT_KINDS.map((kind) => ({
     id: `${idPrefix}.${kind}`,
@@ -173,6 +177,13 @@ export const getEventDefinitions = (idPrefix: string, label: string): IndicatorE
     description: KIND_TEXT[kind].description,
   }));
 };
+
+/**
+ * Same zero-argument contract as every other module. This module emits nothing
+ * under a name of its own (consumers choose the prefix), so the list is empty;
+ * use `eventDefinitionsFor`.
+ */
+export const getEventDefinitions = (): IndicatorEventDefinition[] => [];
 
 const opposite = (role: LevelRole): LevelRole => (role === 'support' ? 'resistance' : 'support');
 
@@ -296,27 +307,13 @@ const walkLevel = ({ level, candles, atrSeries, params, paramsHash, kindId }: Wa
     );
   };
 
-  const formedIndex = level.knowableIndex;
-  emit('formed', formedIndex, 'neutral', bandAt(level.geometry, formedIndex, atrSeries[formedIndex], params.touchAtr), null);
-
-  for (let i = formedIndex + 1; i < candles.length; i += 1) {
+  // Judges one bar. Returns whether price interacted with the level (a touch or
+  // a close through it), which is what keeps a level from expiring.
+  const step = (i: number, band: { price: number; upper: number; lower: number }): boolean => {
     const atr = atrSeries[i];
-    const band = bandAt(level.geometry, i, atr, params.touchAtr);
-
-    if (level.endIndex !== undefined && i > level.endIndex) {
-      state.expired = true;
-      emit('expired', i, 'neutral', band, null);
-      break;
-    }
-    if (i - lastInteraction > params.expiryBars) {
-      state.expired = true;
-      emit('expired', i, 'neutral', band, null);
-      break;
-    }
-
     const { h, l, c } = candles[i];
     if (!isFiniteNumber(atr) || !isFiniteNumber(h) || !isFiniteNumber(l) || !isFiniteNumber(c)) {
-      continue; // ATR warm-up or a bad candle: nothing is judged on this bar.
+      return false; // ATR warm-up or a bad candle: nothing is judged on this bar.
     }
 
     const isSupport = state.role === 'support';
@@ -326,12 +323,13 @@ const walkLevel = ({ level, candles, atrSeries, params, paramsHash, kindId }: Wa
     if (beyond) {
       // The direction price went through the level.
       const direction: LevelDirection = isSupport ? 'bearish' : 'bullish';
-      const reclaim = !state.confirmed && breakIndex !== null && i - breakIndex <= params.reclaimBars;
+      // A close back through within reclaimBars of a break is a failed break,
+      // whether or not a quick retest already flipped the role.
+      const reclaim = breakIndex !== null && i - breakIndex <= params.reclaimBars;
       state.role = opposite(state.role);
       state.phase = 'away';
-      approachOpen = false;
+      approachOpen = true; // price has just come through the level: no fresh approach
       armed = true;
-      lastInteraction = i;
       if (reclaim) {
         state.confirmed = true;
         breakIndex = null;
@@ -341,54 +339,48 @@ const walkLevel = ({ level, candles, atrSeries, params, paramsHash, kindId }: Wa
         breakIndex = i;
         emit('broken', i, direction, band, 0);
       }
-      continue;
+      return true;
     }
 
     const touching = isSupport ? l <= band.upper : h >= band.lower;
     const closedAway = isSupport ? c > band.upper : c < band.lower;
     // The direction a hold implies: a support holding is bullish.
     const holdDirection: LevelDirection = isSupport ? 'bullish' : 'bearish';
+    const distanceAtr = (isSupport ? c - band.upper : band.lower - c) / atr;
 
     if (touching && !armed) {
-      // Still hovering at the level after a hold: the same episode.
-      lastInteraction = i;
-      continue;
+      return true; // still hovering at the level after a hold: the same episode
     }
 
-    if (touching) {
+    if (touching && state.phase === 'away') {
+      state.phase = 'touching';
+      if (state.confirmed) {
+        state.touches += 1;
+        emit('tested', i, 'neutral', band, 0);
+      } else {
+        emit('retested', i, 'neutral', band, 0);
+      }
+    }
+    if (touching && !closedAway) {
       approachOpen = false;
-      lastInteraction = i;
-      if (state.phase === 'away') {
-        state.phase = 'touching';
-        if (state.confirmed) {
-          state.touches += 1;
-          emit('tested', i, 'neutral', band, 0);
-        } else {
-          emit('retested', i, 'neutral', band, 0);
-        }
-      }
-      if (!closedAway) {
-        continue;
-      }
+      return true;
     }
 
     if (state.phase === 'touching') {
       // The touch episode ends with the close back on the level's expected side.
+      // The bar's own close decides whether the next touch is a new episode.
       state.phase = 'away';
-      armed = false;
-      approachOpen = true; // price is still at the level: no fresh approach yet
+      armed = distanceAtr > params.touchResetAtr;
+      approachOpen = distanceAtr <= params.approachResetAtr;
       if (state.confirmed) {
         emit('rejected', i, holdDirection, band, 0);
       } else {
         state.confirmed = true;
-        breakIndex = null;
         emit('flipped', i, holdDirection, band, 0);
       }
-      continue;
+      return touching;
     }
 
-    const distance = isSupport ? c - band.upper : band.lower - c;
-    const distanceAtr = distance / atr;
     if (!armed && distanceAtr > params.touchResetAtr) {
       armed = true;
     }
@@ -399,6 +391,36 @@ const walkLevel = ({ level, candles, atrSeries, params, paramsHash, kindId }: Wa
     } else if (distanceAtr <= params.approachAtr) {
       approachOpen = true;
       emit('approached', i, 'neutral', band, distanceAtr);
+    }
+    return false;
+  };
+
+  // Expiry is known at the close of the bar that ends the level (its endIndex),
+  // or of the expiryBars-th bar without an interaction.
+  const expireIfDue = (i: number, band: { price: number; upper: number; lower: number }): boolean => {
+    const ended = level.endIndex !== undefined && i >= level.endIndex;
+    if (!ended && i - lastInteraction < params.expiryBars) {
+      return false;
+    }
+    state.expired = true;
+    emit('expired', i, 'neutral', band, null);
+    return true;
+  };
+
+  const formedIndex = level.knowableIndex;
+  const formedBand = bandAt(level.geometry, formedIndex, atrSeries[formedIndex], params.touchAtr);
+  emit('formed', formedIndex, 'neutral', formedBand, null);
+  if (expireIfDue(formedIndex, formedBand)) {
+    return { events, state };
+  }
+
+  for (let i = formedIndex + 1; i < candles.length; i += 1) {
+    const band = bandAt(level.geometry, i, atrSeries[i], params.touchAtr);
+    if (step(i, band)) {
+      lastInteraction = i;
+    }
+    if (expireIfDue(i, band)) {
+      break;
     }
   }
 
@@ -428,7 +450,7 @@ export const trackLevelInteractions = (
   }
 
   const definitions = new Map(
-    getEventDefinitions(idPrefix, label ?? idPrefix).map((d) => [d.id.slice(idPrefix.length + 1), d]),
+    eventDefinitionsFor(idPrefix, label ?? idPrefix).map((d) => [d.id.slice(idPrefix.length + 1), d]),
   );
   const kindId = (kind: LevelEventKind) => definitions.get(kind) as IndicatorEventDefinition;
   const atrSeries = candles.length ? wilderAtr(candles, params.atrLength) : [];

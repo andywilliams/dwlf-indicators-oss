@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { Candle } from '../../types';
 import {
   LEVEL_EVENT_KINDS,
+  eventDefinitionsFor,
   getEventDefinitions,
   keepNearestApproaches,
   resolveLevelInteractionParams,
@@ -79,6 +80,20 @@ describe('trackLevelInteractions: one scenario per event', () => {
     expect(states[0]).toMatchObject({ role: 'support', confirmed: true });
   });
 
+  it('a quick retest-and-flip does not close the reclaim window', () => {
+    const candles = series(103, [
+      [101, 101, 98.8, 99.0], // broken
+      [99, 99.8, 98.9, 99.2], // retested + flipped on the very next bar
+      [99.2, 101.5, 99.1, 101.2], // back through within reclaimBars: the break failed
+    ]);
+    expect(kinds(candles).slice(1)).toEqual([
+      ['broken', 20],
+      ['retested', 21],
+      ['flipped', 21],
+      ['reclaimed', 22],
+    ]);
+  });
+
   it('a late return through after reclaimBars is a fresh break of the provisional role, not a reclaim', () => {
     const below = Array.from({ length: 6 }, () => [97, 97.5, 96.5, 97] as [number, number, number, number]);
     const candles = series(103, [[101, 101, 98, 98.5], ...below, [97, 101.5, 97, 101]]);
@@ -86,17 +101,21 @@ describe('trackLevelInteractions: one scenario per event', () => {
     expect(tail).toEqual([['broken', 27]]);
   });
 
-  it('expired after expiryBars without a touch or break, and at endIndex', () => {
+  it('expired at the bar it becomes knowable: the expiryBars-th quiet bar, or endIndex', () => {
     const away = Array.from({ length: 6 }, () => [110, 111, 109, 110] as [number, number, number, number]);
     const candles = series(110, away);
     expect(kinds(candles, [support()], { ...P, expiryBars: 3 })).toEqual([
       ['formed', 19],
-      ['expired', 23],
+      ['expired', 22],
     ]);
     expect(kinds(candles, [support({ endIndex: 21 })])).toEqual([
       ['formed', 19],
-      ['expired', 22],
+      ['expired', 21],
     ]);
+    // endIndex on the last candle still expires the level, in events and state.
+    const last = trackLevelInteractions(candles, [support({ endIndex: candles.length - 1 })], P);
+    expect(last.events.at(-1)?.payload?.kind).toBe('expired');
+    expect(last.states[0].expired).toBe(true);
   });
 });
 
@@ -128,6 +147,27 @@ describe('episode de-dupe', () => {
       ['tested', 26],
       ['rejected', 26],
     ]);
+  });
+
+  it('a hold bar that closes beyond touchResetAtr re-arms at once', () => {
+    const candles = series(110, [
+      [104, 106, 100.1, 106], // tested + rejected, closing 2.85 ATR above the band
+      [105, 105, 100.1, 102], // straight back to the level: a new episode
+    ]);
+    expect(kinds(candles).slice(1)).toEqual([
+      ['tested', 20],
+      ['rejected', 20],
+      ['tested', 21],
+      ['rejected', 21],
+    ]);
+  });
+
+  it('no approached on the bar after a break: price has just come through the level', () => {
+    const candles = series(103, [
+      [101, 101, 98.8, 99.0], // broken: close 0.5 below the band, inside approachAtr
+      [99, 99.3, 98.8, 99.1], // still next to it, not touching
+    ]);
+    expect(kinds(candles).slice(1)).toEqual([['broken', 20]]);
   });
 
   it('a multi-bar touch is one tested and one rejected', () => {
@@ -184,10 +224,11 @@ describe('geometries', () => {
 
 describe('contract', () => {
   it('ids are the prefix plus a published kind, with definitions to match', () => {
-    const defs = getEventDefinitions('keyLevel', 'Key Level');
+    expect(getEventDefinitions()).toEqual([]); // same zero-argument contract as every module
+    const defs = eventDefinitionsFor('keyLevel', 'Key Level');
     expect(defs.map((d) => d.id)).toEqual(LEVEL_EVENT_KINDS.map((k) => `keyLevel.${k}`));
     expect(defs[0].name).toBe('Key Level Formed');
-    expect(() => getEventDefinitions('bad prefix', 'x')).toThrow(TypeError);
+    expect(() => eventDefinitionsFor('bad prefix', 'x')).toThrow(TypeError);
   });
 
   it('nothing is judged before the level is knowable, and nothing before ATR exists', () => {
