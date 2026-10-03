@@ -8,8 +8,8 @@ Support/resistance, key levels, Fibonacci levels, trendlines, VWAP and zones (or
 supply/demand) all need the same questions answered about price and a level: did price approach
 it, test it, hold, break it, come back to it, flip it, or fail to break it. Today each indicator
 answers some of them with its own tolerances (fixed percentages, close-only checks, a simple-mean
-ATR), and some answer none. `SupportResistanceTracker` (this repo) and `srLifecycle` (private
-FSM) are two diverged attempts at the same machine.
+ATR), and some answer none. `SupportResistanceTracker` (removed in 2.0.0) and `srLifecycle`
+(private FSM, since deleted) were two diverged attempts at the same machine.
 
 This module answers them once. A caller supplies **levels** (a geometry, a role, and the bar the
 level became knowable); the module walks the candles and returns events.
@@ -134,11 +134,11 @@ which events predate it.
 1. Key levels (DWLF-333): the first consumer, end to end, under the `keyLevel` prefix.
 2. Fibonacci levels (DWLF-334), trendlines V3 (DWLF-183), ranges (DWLF-60) and zones follow,
    each under its own prefix.
-3. Retired once `keyLevel.*` is live and backfilled, each by its own ticket:
+3. Retired (DWLF-350) now `keyLevel.*` is live and backfilled:
    - the platform's `price_near_sr` and `breakout` events (scheduled-jobs; fixed percentages,
      close-only), superseded by `keyLevel.approached` and `keyLevel.broken`;
-   - `SupportResistanceTracker` and its `supportResistance.level.*` ids. Its one caller (the
-     frontend's markets slice, client-side) switches to reading `keyLevel.*` events from the API;
+   - `SupportResistance` and `SupportResistanceTracker` with their `supportResistance.*` ids
+     (removed in 2.0.0);
    - `srLifecycle` (private, unused), deleted.
 
 ## Not in scope

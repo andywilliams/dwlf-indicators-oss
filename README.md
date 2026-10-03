@@ -15,7 +15,7 @@ pnpm add @dwlf/indicators
 ## Quick Start
 
 ```typescript
-import { DSS, Bollinger, EMA, SupportResistance } from '@dwlf/indicators';
+import { DSS, Bollinger, EMA } from '@dwlf/indicators';
 import type { Candle } from '@dwlf/indicators';
 
 const candles: Candle[] = [
@@ -49,8 +49,6 @@ const emaEvents = EMA.detectEvents(candles, { length: 8 });
 | `SwingBreak` | Swing break detection |
 | `SwingSweep` | Liquidity sweep detection |
 | `Fib` | Fibonacci retracement levels |
-| `SupportResistance` | Support/resistance level calculation |
-| `SupportResistanceTracker` | S/R tracking over time |
 | `Trendline` | Trendline detection |
 | `BreachDetection` | Trendline breach detection |
 
