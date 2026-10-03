@@ -41,6 +41,7 @@ const emaEvents = EMA.detectEvents(candles, { length: 8 });
 | `DSSState` | Streaming DSS state tracking |
 | `Bollinger` | Bollinger Bands (upper, middle, lower, %B, bandwidth) |
 | `ATR` | Wilder Average True Range and ATR% of close; `atr.regime.expansion` / `atr.regime.contraction` events when the ATR% percentile over a trailing window (default 100 bars) reaches the top (80) or bottom (20) band, once per episode until it returns past the reset percentile (50) |
+| `LevelInteraction` | How price interacts with levels you supply (horizontal, sloped or zone): formed, approached, tested, rejected, broken, retested, flipped, reclaimed, expired, ATR-scaled and stamped at the bar they become knowable. See `docs/level-interaction.md` |
 | `EMA` | Exponential Moving Average with event detection |
 | `SMA` | Simple Moving Average with event detection |
 | `EMACloud` | EMA cloud/ribbon (alignment, cloud hit) |

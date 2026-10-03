@@ -3,6 +3,7 @@ export * as DSS from './indicators/dss/dss';
 export * as DSSState from './indicators/dss/dss.state';
 export * as Bollinger from './indicators/bollinger/bollinger';
 export * as ATR from './indicators/atr/atr';
+export * as LevelInteraction from './indicators/level-interaction/levelInteraction';
 export * as SMA from './indicators/moving-average/sma';
 export * as EMA from './indicators/moving-average/ema';
 export * as EMACloud from './indicators/moving-average/emaCloud';
