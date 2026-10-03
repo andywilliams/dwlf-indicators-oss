@@ -15,8 +15,6 @@ export * as TrendlineV1 from './indicators/trendline/trendline.v1';
 export * as BreachDetection from './indicators/trendline/breachDetection';
 export * as SlopeGuards from './indicators/trendline/slopeGuards';
 export * as Fib from './indicators/fib/fib';
-export * as SupportResistance from './indicators/support-resistance/supportResistance';
-export * as SupportResistanceTracker from './indicators/support-resistance/supportResistanceTracker';
 export { hashParams } from './utils/hash';
 export { createIndicatorEvent, type IndicatorEventContext } from './utils/events';
 export { toLinePoints, type ToLinePointsOptions } from './utils/series';
