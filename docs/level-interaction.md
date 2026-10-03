@@ -92,19 +92,22 @@ A break that is not reclaimed within `reclaimBars` and later comes back through 
 
 ## Episode de-dupe rules
 
-- **approached** fires once per approach episode. The episode closes when the close moves more
-  than `approachResetAtr·ATR` from the band, or on any touch or break.
+- **approached** fires once per approach episode. An episode opens when `approached` fires, and
+  also (silently) when a touch episode ends in a hold or a break, since price is already at the
+  level then. It closes when a close is more than `approachResetAtr·ATR` from the band, or while
+  price is touching it. A new `approached` needs a closed episode.
 - **Levels are independent.** One level's events never depend on which other levels were passed
   in the same call. A consumer that wants only the nearest approached level per side and bar
   applies `keepNearestApproaches` to the events afterwards.
 - **tested / retested** fire on the first bar of a touch episode (consecutive touching bars).
-  The episode ends in exactly one of `rejected`, `flipped`, `broken` or `reclaimed`.
-- **Re-arming after a hold.** After `rejected` or `flipped`, a new touch episode needs the close
-  to move more than `touchResetAtr·ATR` away from the band first. Until then, touches are the
+  The episode ends in one of `rejected`, `flipped`, `broken` or `reclaimed`, or the level expires
+  first (`endIndex` or `expiryBars`).
+- **Re-arming after a hold.** After `rejected` or `flipped`, a new touch episode needs a bar that
+  clears the band by more than `touchResetAtr·ATR`, measured from the bar's low for support (high
+  for resistance), not its close. Until then, touches are the
   same episode continuing (price hovering at the level) and fire nothing; a break still fires.
-  The hold bar's own close counts: if it is already beyond `touchResetAtr`, the next touch is a
-  new episode. The approach episode stays open until `approachResetAtr`, and also after a break,
-  since price has just come through the level. Without this rule, a market
+  A bar that touched (the hold bar included) never re-arms, so closes that land just past the
+  threshold while each bar still wicks into the band stay one episode. Without this rule, a market
   that wicks into a level bar after bar fires tested + rejected on every bar (BTC under 79.6k,
   21 Aug to 1 Sep 2026: 8 pairs in 12 days).
 - **formed** and **expired** fire once per level.

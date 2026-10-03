@@ -133,12 +133,12 @@ describe('episode de-dupe', () => {
     ]);
   });
 
-  it('hovering at a level after a hold is one episode; a new test needs touchResetAtr away first', () => {
+  it('hovering at a level after a hold is one episode; a new test needs a bar that clears the band', () => {
     const hover = Array.from({ length: 4 }, () => [101, 101.5, 100.1, 101] as [number, number, number, number]);
     const candles = series(110, [
       [104, 104, 100.1, 101], // tested + rejected
       ...hover, // wick back into the band and close above, bar after bar: nothing
-      [101, 103, 101, 103], // close 2.7 above the band: re-armed
+      [101, 103, 101.5, 103], // low 1.2 above the band: re-armed
       [103, 103, 100.1, 101], // a new episode: tested + rejected
     ]);
     expect(kinds(candles).slice(1)).toEqual([
@@ -149,16 +149,19 @@ describe('episode de-dupe', () => {
     ]);
   });
 
-  it('a hold bar that closes beyond touchResetAtr re-arms at once', () => {
+  it('re-arming needs a bar that clears the band, not just a close away from it', () => {
+    const wicks = Array.from({ length: 3 }, () => [102, 102.5, 100.1, 102] as [number, number, number, number]);
     const candles = series(110, [
-      [104, 106, 100.1, 106], // tested + rejected, closing 2.85 ATR above the band
-      [105, 105, 100.1, 102], // straight back to the level: a new episode
+      [104, 106, 100.1, 106], // tested + rejected, closing far above the band
+      ...wicks, // each wicks back into the band and closes ~0.6 ATR above it: the same episode
+      [102, 104, 102, 103.5], // low clears the band by more than touchResetAtr (0.6 ATR): re-armed
+      [103, 103, 100.1, 101.5], // a new episode
     ]);
     expect(kinds(candles).slice(1)).toEqual([
       ['tested', 20],
       ['rejected', 20],
-      ['tested', 21],
-      ['rejected', 21],
+      ['tested', 25],
+      ['rejected', 25],
     ]);
   });
 

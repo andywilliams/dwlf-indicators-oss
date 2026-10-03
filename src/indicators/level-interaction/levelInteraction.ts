@@ -48,9 +48,10 @@ export type LevelInteractionParams = {
   /** An approach episode closes once the close is this many ATR from the band. */
   approachResetAtr?: number;
   /**
-   * After a hold (rejected or flipped), a new touch episode needs the close to
-   * have moved this many ATR away from the band first; touches before that are
-   * the same episode continuing and fire nothing.
+   * After a hold (rejected or flipped), a new touch episode needs a bar that
+   * clears the band by this many ATR: its low (support) or high (resistance),
+   * not just its close. Touches before that are the same episode continuing
+   * and fire nothing.
    */
   touchResetAtr?: number;
   /** A break needs a close this many ATR beyond the band's far edge. */
@@ -268,7 +269,7 @@ const walkLevel = ({ level, candles, atrSeries, params, paramsHash, kindId }: Wa
   let breakIndex: number | null = null;
   let lastInteraction = level.knowableIndex;
   let approachOpen = false;
-  // False after a hold until the close moves touchResetAtr away from the band.
+  // False after a hold until a bar clears the band by touchResetAtr.
   let armed = true;
 
   const emit = (
@@ -368,9 +369,9 @@ const walkLevel = ({ level, candles, atrSeries, params, paramsHash, kindId }: Wa
 
     if (state.phase === 'touching') {
       // The touch episode ends with the close back on the level's expected side.
-      // The bar's own close decides whether the next touch is a new episode.
+      // This bar reached the band, so it cannot itself be the bar that clears it.
       state.phase = 'away';
-      armed = distanceAtr > params.touchResetAtr;
+      armed = false;
       approachOpen = distanceAtr <= params.approachResetAtr;
       if (state.confirmed) {
         emit('rejected', i, holdDirection, band, 0);
@@ -381,7 +382,8 @@ const walkLevel = ({ level, candles, atrSeries, params, paramsHash, kindId }: Wa
       return touching;
     }
 
-    if (!armed && distanceAtr > params.touchResetAtr) {
+    const clearanceAtr = (isSupport ? l - band.upper : band.lower - h) / atr;
+    if (!armed && clearanceAtr > params.touchResetAtr) {
       armed = true;
     }
     if (approachOpen) {
