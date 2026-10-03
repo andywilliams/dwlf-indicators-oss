@@ -134,7 +134,7 @@ which events predate it.
 1. Key levels (DWLF-333): the first consumer, end to end, under the `keyLevel` prefix.
 2. Fibonacci levels (DWLF-334), trendlines V3 (DWLF-183), ranges (DWLF-60) and zones follow,
    each under its own prefix.
-3. Retired (DWLF-350) now `keyLevel.*` is live and backfilled:
+3. Retired (DWLF-350), now that `keyLevel.*` is live and backfilled:
    - the platform's `price_near_sr` and `breakout` events (scheduled-jobs; fixed percentages,
      close-only), superseded by `keyLevel.approached` and `keyLevel.broken`;
    - `SupportResistance` and `SupportResistanceTracker` with their `supportResistance.*` ids
