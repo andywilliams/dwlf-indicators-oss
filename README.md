@@ -45,7 +45,7 @@ const emaEvents = EMA.detectEvents(candles, { length: 8 });
 | `EMA` | Exponential Moving Average with event detection |
 | `SMA` | Simple Moving Average with event detection |
 | `EMACloud` | EMA cloud/ribbon (alignment, cloud hit) |
-| `Swing` | Swing high/low detection |
+| `Swing` | Swing high/low detection. Formed and higher/lower high/low events are stamped at the bar the pivot becomes knowable (`lookback` bars after it); the pivot is `payload.pivotIndex` / `payload.pivotTime`. Breaks and sweeps are stamped at their own bar |
 | `SwingBreak` | Swing break detection |
 | `SwingSweep` | Liquidity sweep detection |
 | `Fib` | Fibonacci retracement levels |

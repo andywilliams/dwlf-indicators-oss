@@ -20,32 +20,32 @@ const SWING_EVENT_DEFINITIONS = {
   SWING_HIGH_FORMED: {
     id: 'swing_high_formed',
     name: 'Swing High Formed',
-    description: 'A swing high was confirmed using the configured lookback window.',
+    description: 'A swing high was confirmed: stamped on the bar `lookback` bars after the pivot, when it became knowable.',
   },
   SWING_LOW_FORMED: {
     id: 'swing_low_formed',
     name: 'Swing Low Formed',
-    description: 'A swing low was confirmed using the configured lookback window.',
+    description: 'A swing low was confirmed: stamped on the bar `lookback` bars after the pivot, when it became knowable.',
   },
   HIGHER_HIGH: {
     id: 'higher_high',
     name: 'Higher High',
-    description: 'The latest swing high exceeds the previous swing high.',
+    description: 'The latest swing high exceeds the previous swing high: stamped on the bar `lookback` bars after the latest pivot, when it became knowable (the pivot is payload.pivotIndex).',
   },
   LOWER_HIGH: {
     id: 'lower_high',
     name: 'Lower High',
-    description: 'The latest swing high is below the previous swing high.',
+    description: 'The latest swing high is below the previous swing high: stamped on the bar `lookback` bars after the latest pivot, when it became knowable (the pivot is payload.pivotIndex).',
   },
   HIGHER_LOW: {
     id: 'higher_low',
     name: 'Higher Low',
-    description: 'The latest swing low exceeds the previous swing low.',
+    description: 'The latest swing low exceeds the previous swing low: stamped on the bar `lookback` bars after the latest pivot, when it became knowable (the pivot is payload.pivotIndex).',
   },
   LOWER_LOW: {
     id: 'lower_low',
     name: 'Lower Low',
-    description: 'The latest swing low is below the previous swing low.',
+    description: 'The latest swing low is below the previous swing low: stamped on the bar `lookback` bars after the latest pivot, when it became knowable (the pivot is payload.pivotIndex).',
   },
   SWING_HIGH_BREAK: {
     id: 'swing_high_break',
@@ -98,18 +98,28 @@ export type SwingsResult = {
   params: ResolvedSwingParams;
 };
 
-type SwingFormedPayload = {
+// A swing is a pivot bar, but it is only knowable once `lookback` bars have
+// closed to its right. Formed and comparison events are stamped at that
+// knowable bar (`index`, `t`, `candle`); the pivot itself rides the payload.
+type SwingPivotFields = {
+  pivotIndex: number;
+  pivotTime: number;
+};
+
+type SwingFormedPayload = SwingPivotFields & {
   variant: 'swing_high_formed' | 'swing_low_formed';
   price: number;
   swingType: 'high' | 'low';
   lookback: number;
 };
 
-type SwingComparisonPayload = {
+type SwingComparisonPayload = SwingPivotFields & {
   variant: 'higher_high' | 'lower_high' | 'higher_low' | 'lower_low';
   swingType: 'high' | 'low';
   currentPrice: number;
   previousPrice: number;
+  previousPivotIndex: number;
+  previousPivotTime: number;
 };
 
 type SwingBreakPayload = {
@@ -236,6 +246,13 @@ export const detectEvents = (
   const result = computeSwings(candles, params);
   const events: IndicatorEvent<SwingEventPayload>[] = [];
 
+  // The bar a pivot becomes knowable on: `lookback` bars to its right have
+  // closed. computeSwings only returns pivots with that many bars after them.
+  const knowableAt = (point: SwingHigh | SwingLow) => {
+    const index = point.index + result.params.lookback;
+    return { index, candle: candles[index] };
+  };
+
   const addFormedEvent = (point: SwingHigh | SwingLow) => {
     const isHigh = point.type === 'high';
     const definition = isHigh
@@ -245,13 +262,14 @@ export const detectEvents = (
 
     events.push(
       createIndicatorEvent(definition, {
-        candle: point.candle,
-        index: point.index,
+        ...knowableAt(point),
         payload: {
           variant,
           price: point.price,
           swingType: point.type,
           lookback: result.params.lookback,
+          pivotIndex: point.index,
+          pivotTime: point.t,
         },
       }),
     );
@@ -276,13 +294,16 @@ export const detectEvents = (
     if (variant && definition) {
       events.push(
         createIndicatorEvent(definition, {
-          candle: current.candle,
-          index: current.index,
+          ...knowableAt(current),
           payload: {
             variant,
             swingType: 'high',
             currentPrice: current.price,
             previousPrice: previous.price,
+            pivotIndex: current.index,
+            pivotTime: current.t,
+            previousPivotIndex: previous.index,
+            previousPivotTime: previous.t,
           },
         }),
       );
@@ -305,13 +326,16 @@ export const detectEvents = (
     if (variant && definition) {
       events.push(
         createIndicatorEvent(definition, {
-          candle: current.candle,
-          index: current.index,
+          ...knowableAt(current),
           payload: {
             variant,
             swingType: 'low',
             currentPrice: current.price,
             previousPrice: previous.price,
+            pivotIndex: current.index,
+            pivotTime: current.t,
+            previousPivotIndex: previous.index,
+            previousPivotTime: previous.t,
           },
         }),
       );
@@ -352,16 +376,22 @@ export const detectEvents = (
     );
   };
 
-  // Look for breaks of the most recent swing high/low only (between swings of the same type)
+  // A swing stays the most recent of its type, so the one a break or sweep is
+  // measured against, until the next swing of its type is KNOWABLE (its pivot
+  // + lookback), not from that swing's pivot bar: until then a live run cannot
+  // know it exists. The window includes the next swing's own candle, so a new
+  // swing that exceeds the prior one counts as its break. For breaks this
+  // changes nothing on finite prices (a bar after the next pivot cannot cross
+  // a level the pivot did not); for sweeps it does.
+  const currentUntil = (next: SwingHigh | SwingLow | undefined) => (
+    next ? next.index + result.params.lookback + 1 : null
+  );
   result.highs.forEach((point, idx) => {
-    const next = result.highs[idx + 1];
-    // include the next swing candle so a new swing that exceeds the prior one counts as the break
-    addBreakEvent(point, next ? next.index + 1 : null);
+    addBreakEvent(point, currentUntil(result.highs[idx + 1]));
   });
 
   result.lows.forEach((point, idx) => {
-    const next = result.lows[idx + 1];
-    addBreakEvent(point, next ? next.index + 1 : null);
+    addBreakEvent(point, currentUntil(result.lows[idx + 1]));
   });
 
   const addSweepEvent = (
@@ -406,13 +436,11 @@ export const detectEvents = (
 
   if (result.params.sweepBars > 0) {
     result.highs.forEach((point, idx) => {
-      const next = result.highs[idx + 1];
-      addSweepEvent(point, next ? next.index + 1 : null);
+      addSweepEvent(point, currentUntil(result.highs[idx + 1]));
     });
 
     result.lows.forEach((point, idx) => {
-      const next = result.lows[idx + 1];
-      addSweepEvent(point, next ? next.index + 1 : null);
+      addSweepEvent(point, currentUntil(result.lows[idx + 1]));
     });
   }
 
