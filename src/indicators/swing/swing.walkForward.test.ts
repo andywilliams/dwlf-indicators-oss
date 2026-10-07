@@ -31,12 +31,12 @@ const key = (e: { id: string; index?: number; t?: number; payload?: unknown }) =
 describe('swing events are walk-forward stable', () => {
   const candles = walk(400);
 
-  for (const lookback of [3, 5]) {
-    it(`a truncated run equals the full run's prefix (lookback ${lookback})`, () => {
-      const full = detectEvents(candles, { lookback });
+  for (const [lookback, sweepBars] of [[3, 1], [5, 1], [3, 3], [5, 4]]) {
+    it(`a truncated run equals the full run's prefix (lookback ${lookback}, sweepBars ${sweepBars})`, () => {
+      const full = detectEvents(candles, { lookback, sweepBars });
       expect(full.length).toBeGreaterThan(50);
-      for (let k = 20; k < candles.length; k += 7) {
-        const truncated = detectEvents(candles.slice(0, k + 1), { lookback }).map(key).sort();
+      for (let k = 20; k < candles.length; k += 1) {
+        const truncated = detectEvents(candles.slice(0, k + 1), { lookback, sweepBars }).map(key).sort();
         const prefix = full.filter((e) => (e.index ?? -1) <= k).map(key).sort();
         expect(truncated, `cut at bar ${k}`).toEqual(prefix);
       }

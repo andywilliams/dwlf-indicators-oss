@@ -30,22 +30,22 @@ const SWING_EVENT_DEFINITIONS = {
   HIGHER_HIGH: {
     id: 'higher_high',
     name: 'Higher High',
-    description: 'The latest swing high exceeds the previous swing high.',
+    description: 'The latest swing high exceeds the previous swing high: stamped on the bar `lookback` bars after the latest pivot, when it became knowable (the pivot is payload.pivotIndex).',
   },
   LOWER_HIGH: {
     id: 'lower_high',
     name: 'Lower High',
-    description: 'The latest swing high is below the previous swing high.',
+    description: 'The latest swing high is below the previous swing high: stamped on the bar `lookback` bars after the latest pivot, when it became knowable (the pivot is payload.pivotIndex).',
   },
   HIGHER_LOW: {
     id: 'higher_low',
     name: 'Higher Low',
-    description: 'The latest swing low exceeds the previous swing low.',
+    description: 'The latest swing low exceeds the previous swing low: stamped on the bar `lookback` bars after the latest pivot, when it became knowable (the pivot is payload.pivotIndex).',
   },
   LOWER_LOW: {
     id: 'lower_low',
     name: 'Lower Low',
-    description: 'The latest swing low is below the previous swing low.',
+    description: 'The latest swing low is below the previous swing low: stamped on the bar `lookback` bars after the latest pivot, when it became knowable (the pivot is payload.pivotIndex).',
   },
   SWING_HIGH_BREAK: {
     id: 'swing_high_break',
@@ -380,12 +380,12 @@ export const detectEvents = (
   result.highs.forEach((point, idx) => {
     const next = result.highs[idx + 1];
     // include the next swing candle so a new swing that exceeds the prior one counts as the break
-    addBreakEvent(point, next ? next.index + 1 : null);
+    addBreakEvent(point, next ? next.index + result.params.lookback + 1 : null);
   });
 
   result.lows.forEach((point, idx) => {
     const next = result.lows[idx + 1];
-    addBreakEvent(point, next ? next.index + 1 : null);
+    addBreakEvent(point, next ? next.index + result.params.lookback + 1 : null);
   });
 
   const addSweepEvent = (
@@ -429,14 +429,19 @@ export const detectEvents = (
   };
 
   if (result.params.sweepBars > 0) {
+    // A swing stays the one being swept until the next swing of its type is
+    // KNOWABLE (its pivot + lookback), not from its pivot bar: until then a
+    // live run cannot know it exists. (Breaks need no such window: a bar after
+    // the next pivot cannot cross a level the pivot itself did not.)
+    const sweepEnd = (next: SwingHigh | SwingLow | undefined) => (
+      next ? next.index + result.params.lookback + 1 : null
+    );
     result.highs.forEach((point, idx) => {
-      const next = result.highs[idx + 1];
-      addSweepEvent(point, next ? next.index + 1 : null);
+      addSweepEvent(point, sweepEnd(result.highs[idx + 1]));
     });
 
     result.lows.forEach((point, idx) => {
-      const next = result.lows[idx + 1];
-      addSweepEvent(point, next ? next.index + 1 : null);
+      addSweepEvent(point, sweepEnd(result.lows[idx + 1]));
     });
   }
 
