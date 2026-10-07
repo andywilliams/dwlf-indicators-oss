@@ -90,7 +90,7 @@ describe('EMA cross payload (DWLF-331)', () => {
     const closes = [10, 10, 10, 10, 10, 9, 8, 12, 13, 14, 9, 8];
     const candles = closes.map((c, i) => ({ t: i, o: c, h: c, l: c, c, v: 1 }));
     const events = detectEvents(candles, { length: 3 });
-    expect(events.length).toBeGreaterThan(0);
+    expect(new Set(events.map((e) => e.id))).toEqual(new Set(['ema.cross.above', 'ema.cross.below']));
     for (const e of events) {expect(e.payload?.length).toBe(3);}
   });
 });
