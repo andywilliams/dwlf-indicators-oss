@@ -1,6 +1,7 @@
 import type { Candle, IndicatorEvent } from '../../types';
 import { computeSwings } from '../swing/swing';
-import { evaluateTrendlineBreaches } from './breachDetection';
+import { evaluateTrendlineBarBreach } from './breachBar';
+import type { TrendlineBreachDetail } from './breachBar';
 import { isSlopeDirectionCompatible } from './slopeGuards';
 import type { TrendlineBreachEventPayloadBase } from './trendline';
 import { createIndicatorEvent } from '../../utils/events';
@@ -181,6 +182,7 @@ const generateTrendlines = (
   candles: Candle[],
   swingPoints: SwingPoint[],
   direction: 'support' | 'resistance',
+  lastIndex = candles.length - 1,
 ): TrendlineV1[] => {
   const trendlines: TrendlineV1[] = [];
   if (!groupedPoints.length) {
@@ -198,7 +200,7 @@ const generateTrendlines = (
     }
 
     const isSupport = direction === 'support';
-    let extendedEndIndex = candles.length - 1;
+    let extendedEndIndex = lastIndex;
     let extendedEndPrice = bestLine.slope * extendedEndIndex + bestLine.intercept;
 
     const futureSwings = swingPoints
@@ -234,7 +236,7 @@ const generateTrendlines = (
       extendedEndIndex = terminatingSwing.index;
       extendedEndPrice = bestLine.slope * extendedEndIndex + bestLine.intercept;
     } else if (!trendBroken) {
-      extendedEndIndex = candles.length - 1;
+      extendedEndIndex = lastIndex;
       extendedEndPrice = bestLine.slope * extendedEndIndex + bestLine.intercept;
     } else {
       const fallback = swingPoints.find((point) => point.index > bestLine.end.index);
@@ -300,10 +302,30 @@ export const computeTrendlinesV1 = (
 
 export const getEventDefinitions = () => Object.values(TRENDLINE_V1_EVENT_DEFINITIONS);
 
-type TrendlineV1BreachPayload = TrendlineBreachEventPayloadBase & { version: 1 };
+type TrendlineV1BreachPayload = TrendlineBreachEventPayloadBase & {
+  version: 1;
+  /** The line's second pivot: it became knowable `swingLookback` bars later. */
+  anchorIndex: number;
+};
 
 type TrendlineV1Event = IndicatorEvent<TrendlineV1BreachPayload>;
 
+// A line as a live run sees it: drawn from the pivots knowable so far, and
+// spent once a close has broken it.
+type LiveLine = { line: TrendlineV1; spent: boolean };
+
+const lineKey = (line: TrendlineV1) => `${line.type}:${line.startIndex}:${line.anchorEndIndex}`;
+
+/**
+ * DWLF-330: a break fires on the bar it happens, measured only against lines
+ * a live run could draw on that bar. A swing pivot is knowable `swingLookback`
+ * bars after it, so on bar k the lines are the ones drawn from the pivots
+ * knowable by k, and a line the next pivot has not yet terminated is still
+ * active. Each bar is judged from that bar and the one before it, against the
+ * lines as of that bar, so a run cut at any bar emits exactly the full run's
+ * events up to it, and the payload (`endIndex` included) is state as of the
+ * break.
+ */
 export const detectEvents = (
   candles: Candle[],
   params?: TrendlineV1Params,
@@ -312,101 +334,138 @@ export const detectEvents = (
     return [];
   }
 
-  const { trendlines } = computeTrendlinesV1(candles, params);
-
-  const eventMap = new Map<string, TrendlineV1Event>();
-  const eventDistance = new Map<string, number>();
-
-  for (const line of trendlines) {
-    const shouldLimitCandles = !line.isActive && line.endIndex < candles.length - 1;
-
-    const evaluationCandles = shouldLimitCandles
-      ? candles.slice(0, Math.max(line.endIndex + 1, 2))
-      : candles;
-
-    const evaluation = evaluateTrendlineBreaches(evaluationCandles, {
-      type: line.type,
-      startIndex: line.startIndex,
-      endIndex: line.endIndex,
-      startPrice: line.start.price,
-      slope: line.slope,
-      activationIndex: line.anchorEndIndex,
-      breachedAtIndex: line.isActive ? undefined : line.endIndex,
-    });
-    const shared = {
-      lineType: line.type,
-      slope: line.slope,
-      startIndex: line.startIndex,
-      endIndex: line.endIndex,
-    };
-
-    const boundedStart = line.startIndex;
-    const boundedEnd = line.endIndex;
-
-    const evaluationEvents = [
-      ...evaluation.breaches.map((detail) => ({
-        definition: getTrendlineV1Definition(detail.breakType, 'intraday'),
-        variant: 'intraday' as const,
-        detail,
-      })),
-      ...evaluation.breachCloses.map((detail) => ({
-        definition: getTrendlineV1Definition(detail.breakType, 'close'),
-        variant: 'close' as const,
-        detail,
-      })),
-    ]
-      // Only keep events that occur while the line is defined on the chart
-      .filter((entry) => entry.detail.index >= boundedStart && entry.detail.index <= boundedEnd);
-
-    evaluationEvents.sort((a, b) => {
-      if (a.detail.index !== b.detail.index) {
-        return a.detail.index - b.detail.index;
-      }
-      if (a.variant === b.variant) {
-        return 0;
-      }
-      return a.variant === 'intraday' ? -1 : 1;
-    });
-
-    for (const entry of evaluationEvents) {
-      if (!isSlopeDirectionCompatible(line.slope, entry.detail.breakType)) {
-        continue;
-      }
-
-      const priceReference =
-        entry.variant === 'intraday' ? entry.detail.extremePrice : entry.detail.close;
-      const distance = Math.abs(entry.detail.linePrice - priceReference);
-
-      const indicatorEvent = createIndicatorEvent(entry.definition, {
-        candle: candles[entry.detail.index],
-        index: entry.detail.index,
-        t: entry.detail.t,
-        payload: {
-          ...shared,
-          variant: entry.variant,
-          detail: entry.detail,
-          version: 1 as const,
-        },
-      });
-
-      const key = `${indicatorEvent.id}:${entry.detail.index}:${entry.detail.breakType}:${entry.variant}`;
-      const currentDistance = eventDistance.get(key);
-      if (currentDistance === undefined || distance < currentDistance) {
-        eventDistance.set(key, distance);
-        eventMap.set(key, indicatorEvent);
-      }
+  const { swingLookback } = resolveParams(params);
+  const { highs, lows } = computeSwings(candles, { lookback: swingLookback });
+  const knownCount = (points: SwingPoint[], from: number, k: number) => {
+    let count = from;
+    while (count < points.length && points[count].index + swingLookback <= k) {
+      count += 1;
     }
-  }
-
-  const resolveEventIndex = (event: TrendlineV1Event): number => {
-    if (Number.isFinite(event.index)) {
-      return event.index as number;
-    }
-    return event.payload?.detail?.index ?? 0;
+    return count;
   };
 
-  const breachEvents = Array.from(eventMap.values()).sort(
-    (a, b) => resolveEventIndex(a) - resolveEventIndex(b),
-  );
-  return breachEvents;
+  // The active lines of each direction, carried from one bar to the next. A
+  // line keeps its spent state only while it stays drawn: one that drops out
+  // and is drawn again was not judged in between, so it is checked afresh.
+  let support: LiveLine[] = [];
+  let resistance: LiveLine[] = [];
+  let knownLows = 0;
+  let knownHighs = 0;
+  const events: TrendlineV1Event[] = [];
+
+  // Whether a close broke the line on any bar from its activation up to `k`.
+  const spentBefore = (line: TrendlineV1, k: number) => {
+    for (let index = line.anchorEndIndex + 1; index < k; index += 1) {
+      if (evaluateTrendlineBarBreach(candles, toTrendlineLike(line), index, line.anchorEndIndex).breachClose) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  // A group whose line has been terminated stays terminated (pivots are only
+  // ever appended), so it is not redrawn again.
+  const retired = new Set<string>();
+  const groupKey = (group: SwingPoint[]) => `${group[0].index}:${group[group.length - 1].index}`;
+
+  const redraw = (
+    previous: LiveLine[],
+    points: SwingPoint[],
+    groups: SwingPoint[][],
+    direction: 'support' | 'resistance',
+    k: number,
+  ): LiveLine[] => {
+    const carried = new Map(previous.map((entry) => [lineKey(entry.line), entry]));
+    const active: TrendlineV1[] = [];
+    for (const group of groups) {
+      const key = `${direction}:${groupKey(group)}`;
+      if (retired.has(key)) {
+        continue;
+      }
+      for (const line of generateTrendlines([group], candles, points, direction, k)) {
+        if (line.isActive) {
+          active.push(line);
+        } else {
+          retired.add(key);
+        }
+      }
+    }
+    return active.map((line) => carried.get(lineKey(line)) ?? { line, spent: spentBefore(line, k) });
+  };
+
+  for (let k = 1; k < candles.length; k += 1) {
+    const lowsNow = knownCount(lows, knownLows, k);
+    if (lowsNow !== knownLows) {
+      knownLows = lowsNow;
+      const known = lows.slice(0, knownLows);
+      support = redraw(support, known, groupUpwardSwingLows(known), 'support', k);
+    }
+    const highsNow = knownCount(highs, knownHighs, k);
+    if (highsNow !== knownHighs) {
+      knownHighs = highsNow;
+      const known = highs.slice(0, knownHighs);
+      resistance = redraw(resistance, known, groupDownwardSwingHighs(known), 'resistance', k);
+    }
+    const live = [...support, ...resistance];
+
+    const best = new Map<string, { event: TrendlineV1Event; distance: number }>();
+    for (const entry of live) {
+      if (entry.spent) {
+        continue;
+      }
+      const { line } = entry;
+      const { breach, breachClose } = evaluateTrendlineBarBreach(candles, toTrendlineLike(line), k, line.anchorEndIndex);
+      if (breachClose) {
+        entry.spent = true;
+      }
+      const found: Array<{ variant: 'intraday' | 'close'; detail: TrendlineBreachDetail }> = [];
+      if (breach) {
+        found.push({ variant: 'intraday', detail: breach });
+      }
+      if (breachClose) {
+        found.push({ variant: 'close', detail: breachClose });
+      }
+      for (const { variant, detail } of found) {
+        if (!isSlopeDirectionCompatible(line.slope, detail.breakType)) {
+          continue;
+        }
+        const definition = getTrendlineV1Definition(detail.breakType, variant);
+        const priceReference = variant === 'intraday' ? detail.extremePrice : detail.close;
+        const distance = Math.abs(detail.linePrice - priceReference);
+        const event = createIndicatorEvent(definition, {
+          candle: candles[k],
+          index: k,
+          t: detail.t,
+          payload: {
+            lineType: line.type,
+            slope: line.slope,
+            startIndex: line.startIndex,
+            endIndex: k,
+            anchorIndex: line.anchorEndIndex,
+            variant,
+            detail,
+            version: 1 as const,
+          },
+        });
+        const key = `${definition.id}:${detail.breakType}:${variant}`;
+        const current = best.get(key);
+        if (current === undefined || distance < current.distance) {
+          best.set(key, { event, distance });
+        }
+      }
+    }
+    // Intraday before close on the same bar, as before.
+    const order = (e: TrendlineV1Event) => (e.payload?.variant === 'intraday' ? 0 : 1);
+    events.push(...[...best.values()].map((b) => b.event).sort((a, b) => order(a) - order(b)));
+  }
+
+  return events;
 };
+
+const toTrendlineLike = (line: TrendlineV1) => ({
+  type: line.type,
+  startIndex: line.startIndex,
+  endIndex: line.endIndex,
+  startPrice: line.start.price,
+  slope: line.slope,
+});

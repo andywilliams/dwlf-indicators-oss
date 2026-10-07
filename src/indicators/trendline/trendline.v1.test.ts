@@ -98,22 +98,6 @@ describe('trendline v1 events', () => {
     expect(calmEvents.some((event) => event.id.startsWith('trendline_breach'))).toBe(false);
   });
 
-  it('never emits breach events beyond a line’s end index', () => {
-    const candles = buildMarketData({ withBreak: true });
-    const events = detectEvents(candles, { swingLookback: 2 });
-
-    const breachEvents = events.filter(
-      (event) => event.id === 'trendline_breach_bearish' || event.id === 'trendline_break_bearish',
-    );
-
-    breachEvents.forEach((event) => {
-      expect(event.payload).toBeDefined();
-      if (event.payload) {
-        expect(event.payload.detail.index).toBeLessThanOrEqual(event.payload.endIndex);
-      }
-    });
-  });
-
   it('emits breach events for active lines when price breaks later', () => {
     const candles = buildMarketData({ withBreak: true });
     const events = detectEvents(candles, { swingLookback: 2 });
@@ -126,7 +110,40 @@ describe('trendline v1 events', () => {
     expect(breakEvent).toBeTruthy();
     if (breakEvent && breakEvent.payload?.detail) {
       expect(breakEvent.payload.detail.index).toBeGreaterThan(breakEvent.payload.startIndex);
-      expect(breakEvent.payload.detail.index).toBeLessThanOrEqual(breakEvent.payload.endIndex);
     }
   });
+
+  it('stops judging a support line once a lower low is knowable, even one that only wicked through', () => {
+    // Lows 95 (bar 1) and 97 (bar 3) draw support at 95 + (k - 1). Bar 6 wicks
+    // to 96, below the line but closing above it: a lower low, knowable on bar 7
+    // with swingLookback 1. Bar 8 then closes below the line, but the line has
+    // ended, so nothing fires there.
+    const bars: Array<[number, number, number]> = [
+      [100, 103, 104], [95, 98, 100], [100, 104, 106], [97, 100, 102], [101, 105, 107],
+      [101, 104, 106], [96, 101, 105], [99, 103, 105], [99.5, 100, 104], [100, 101, 103],
+    ];
+    const candles = bars.map(([l, c, h], index) => ({ t: index, o: c, h, l, c }));
+    const support = detectEvents(candles, { swingLookback: 1 }).filter(
+      (event) => event.payload?.lineType === 'support',
+    );
+    expect(support.map((event) => `${event.id}@${event.index}`)).toEqual(['trendline_breach_bearish@6']);
+  });
+
+  it('a line drawn again after a gap stays spent if a close broke it in the gap', () => {
+    // Support lows a(1,10) b(6,12) c(11,20) d(16,21) e(21,30), swingLookback 1.
+    // The best pair is a-c, then a-d once d is knowable (bar 17), then a-c again
+    // once e is (bar 22). Bar 17 closes through a-c while a-d is drawn instead,
+    // so when a-c returns it is already spent: bar 24's close through it is no break.
+    const lows = [12, 10, 11, 11.5, 12.5, 13, 12, 13, 15, 18, 21, 20, 22, 23, 24, 22.5, 21, 22, 25, 26, 31, 30, 32, 33, 31, 35];
+    const closes: Record<number, number> = { 15: 24.5, 16: 26, 17: 25.5, 23: 34, 24: 31.5 };
+    const candles = lows.map((l, t) => {
+      const c = closes[t] ?? l + 1.5;
+      return { t, o: l + 1, l, h: Math.max(l + 3, c + 0.5), c };
+    });
+    const support = detectEvents(candles, { swingLookback: 1 }).filter(
+      (event) => event.payload?.lineType === 'support',
+    );
+    expect(support.map((event) => `${event.id}@${event.index}`)).toEqual(['trendline_breach_bearish@15']);
+  });
 });
+
