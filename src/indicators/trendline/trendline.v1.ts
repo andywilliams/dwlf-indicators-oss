@@ -363,6 +363,11 @@ export const detectEvents = (
     return false;
   };
 
+  // A group whose line has been terminated stays terminated (pivots are only
+  // ever appended), so it is not redrawn again.
+  const retired = new Set<string>();
+  const groupKey = (group: SwingPoint[]) => `${group[0].index}:${group[group.length - 1].index}`;
+
   const redraw = (
     previous: LiveLine[],
     points: SwingPoint[],
@@ -371,9 +376,21 @@ export const detectEvents = (
     k: number,
   ): LiveLine[] => {
     const carried = new Map(previous.map((entry) => [lineKey(entry.line), entry]));
-    return generateTrendlines(groups, candles, points, direction, k)
-      .filter((line) => line.isActive)
-      .map((line) => carried.get(lineKey(line)) ?? { line, spent: spentBefore(line, k) });
+    const active: TrendlineV1[] = [];
+    for (const group of groups) {
+      const key = `${direction}:${groupKey(group)}`;
+      if (retired.has(key)) {
+        continue;
+      }
+      for (const line of generateTrendlines([group], candles, points, direction, k)) {
+        if (line.isActive) {
+          active.push(line);
+        } else {
+          retired.add(key);
+        }
+      }
+    }
+    return active.map((line) => carried.get(lineKey(line)) ?? { line, spent: spentBefore(line, k) });
   };
 
   for (let k = 1; k < candles.length; k += 1) {
