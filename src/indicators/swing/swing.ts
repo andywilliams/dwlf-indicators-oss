@@ -20,32 +20,32 @@ const SWING_EVENT_DEFINITIONS = {
   SWING_HIGH_FORMED: {
     id: 'swing_high_formed',
     name: 'Swing High Formed',
-    description: 'A swing high was confirmed: stamped on the bar `lookback` bars after the pivot, when it became knowable.',
+    description: 'A swing high was confirmed. The event falls on the confirming bar, a few bars after the high itself.',
   },
   SWING_LOW_FORMED: {
     id: 'swing_low_formed',
     name: 'Swing Low Formed',
-    description: 'A swing low was confirmed: stamped on the bar `lookback` bars after the pivot, when it became knowable.',
+    description: 'A swing low was confirmed. The event falls on the confirming bar, a few bars after the low itself.',
   },
   HIGHER_HIGH: {
     id: 'higher_high',
     name: 'Higher High',
-    description: 'The latest swing high exceeds the previous swing high: stamped on the bar `lookback` bars after the latest pivot, when it became knowable (the pivot is payload.pivotIndex).',
+    description: 'A new swing high above the previous one was confirmed. The event falls on the confirming bar, a few bars after the high itself.',
   },
   LOWER_HIGH: {
     id: 'lower_high',
     name: 'Lower High',
-    description: 'The latest swing high is below the previous swing high: stamped on the bar `lookback` bars after the latest pivot, when it became knowable (the pivot is payload.pivotIndex).',
+    description: 'A new swing high below the previous one was confirmed. The event falls on the confirming bar, a few bars after the high itself.',
   },
   HIGHER_LOW: {
     id: 'higher_low',
     name: 'Higher Low',
-    description: 'The latest swing low exceeds the previous swing low: stamped on the bar `lookback` bars after the latest pivot, when it became knowable (the pivot is payload.pivotIndex).',
+    description: 'A new swing low above the previous one was confirmed. The event falls on the confirming bar, a few bars after the low itself.',
   },
   LOWER_LOW: {
     id: 'lower_low',
     name: 'Lower Low',
-    description: 'The latest swing low is below the previous swing low: stamped on the bar `lookback` bars after the latest pivot, when it became knowable (the pivot is payload.pivotIndex).',
+    description: 'A new swing low below the previous one was confirmed. The event falls on the confirming bar, a few bars after the low itself.',
   },
   SWING_HIGH_BREAK: {
     id: 'swing_high_break',
