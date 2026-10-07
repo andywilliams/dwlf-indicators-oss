@@ -376,16 +376,22 @@ export const detectEvents = (
     );
   };
 
-  // Look for breaks of the most recent swing high/low only (between swings of the same type)
+  // A swing stays the most recent of its type, so the one a break or sweep is
+  // measured against, until the next swing of its type is KNOWABLE (its pivot
+  // + lookback), not from that swing's pivot bar: until then a live run cannot
+  // know it exists. The window includes the next swing's own candle, so a new
+  // swing that exceeds the prior one counts as its break. For breaks this
+  // changes nothing on finite prices (a bar after the next pivot cannot cross
+  // a level the pivot did not); for sweeps it does.
+  const currentUntil = (next: SwingHigh | SwingLow | undefined) => (
+    next ? next.index + result.params.lookback + 1 : null
+  );
   result.highs.forEach((point, idx) => {
-    const next = result.highs[idx + 1];
-    // include the next swing candle so a new swing that exceeds the prior one counts as the break
-    addBreakEvent(point, next ? next.index + result.params.lookback + 1 : null);
+    addBreakEvent(point, currentUntil(result.highs[idx + 1]));
   });
 
   result.lows.forEach((point, idx) => {
-    const next = result.lows[idx + 1];
-    addBreakEvent(point, next ? next.index + result.params.lookback + 1 : null);
+    addBreakEvent(point, currentUntil(result.lows[idx + 1]));
   });
 
   const addSweepEvent = (
@@ -429,19 +435,12 @@ export const detectEvents = (
   };
 
   if (result.params.sweepBars > 0) {
-    // A swing stays the one being swept until the next swing of its type is
-    // KNOWABLE (its pivot + lookback), not from its pivot bar: until then a
-    // live run cannot know it exists. (Breaks need no such window: a bar after
-    // the next pivot cannot cross a level the pivot itself did not.)
-    const sweepEnd = (next: SwingHigh | SwingLow | undefined) => (
-      next ? next.index + result.params.lookback + 1 : null
-    );
     result.highs.forEach((point, idx) => {
-      addSweepEvent(point, sweepEnd(result.highs[idx + 1]));
+      addSweepEvent(point, currentUntil(result.highs[idx + 1]));
     });
 
     result.lows.forEach((point, idx) => {
-      addSweepEvent(point, sweepEnd(result.lows[idx + 1]));
+      addSweepEvent(point, currentUntil(result.lows[idx + 1]));
     });
   }
 
