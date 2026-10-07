@@ -32,6 +32,9 @@ export type SmaCrossEventPayload = {
   price: number;
   average: number;
   source: ResolvedMovingAverageParams['source'];
+  // The average's period, so a stored cross says which average it crossed
+  // without parsing a key (DWLF-331).
+  length: number;
 };
 
 export const computeSMA = (candles: Candle[], params?: MovingAverageParams): SmaResult => {
@@ -92,6 +95,7 @@ export const detectEvents = (
             price,
             average: value,
             source: resolved.source,
+            length: resolved.length,
           },
         }),
       );
@@ -104,6 +108,7 @@ export const detectEvents = (
             price,
             average: value,
             source: resolved.source,
+            length: resolved.length,
           },
         }),
       );
