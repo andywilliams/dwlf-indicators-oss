@@ -789,6 +789,12 @@ export type TrendlineBreachEventPayloadBase = {
   lineType: Trendline['type'];
   slope: number;
   startIndex: number;
+  /**
+   * The line's last bar as the run that fired the event knew it. In v1 that
+   * is the event's own bar (a v1 run replays the series live, DWLF-330); in
+   * v2 it is the line's end over the whole series, so read it as state as of
+   * the event only in v1.
+   */
   endIndex: number;
   variant: 'intraday' | 'close';
   detail: TrendlineBreachDetail;
