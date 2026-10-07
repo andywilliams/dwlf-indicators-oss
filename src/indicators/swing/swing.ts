@@ -20,12 +20,12 @@ const SWING_EVENT_DEFINITIONS = {
   SWING_HIGH_FORMED: {
     id: 'swing_high_formed',
     name: 'Swing High Formed',
-    description: 'A swing high was confirmed using the configured lookback window.',
+    description: 'A swing high was confirmed: stamped on the bar `lookback` bars after the pivot, when it became knowable.',
   },
   SWING_LOW_FORMED: {
     id: 'swing_low_formed',
     name: 'Swing Low Formed',
-    description: 'A swing low was confirmed using the configured lookback window.',
+    description: 'A swing low was confirmed: stamped on the bar `lookback` bars after the pivot, when it became knowable.',
   },
   HIGHER_HIGH: {
     id: 'higher_high',
@@ -98,18 +98,28 @@ export type SwingsResult = {
   params: ResolvedSwingParams;
 };
 
-type SwingFormedPayload = {
+// A swing is a pivot bar, but it is only knowable once `lookback` bars have
+// closed to its right. Formed and comparison events are stamped at that
+// knowable bar (`index`, `t`, `candle`); the pivot itself rides the payload.
+type SwingPivotFields = {
+  pivotIndex: number;
+  pivotTime: number;
+};
+
+type SwingFormedPayload = SwingPivotFields & {
   variant: 'swing_high_formed' | 'swing_low_formed';
   price: number;
   swingType: 'high' | 'low';
   lookback: number;
 };
 
-type SwingComparisonPayload = {
+type SwingComparisonPayload = SwingPivotFields & {
   variant: 'higher_high' | 'lower_high' | 'higher_low' | 'lower_low';
   swingType: 'high' | 'low';
   currentPrice: number;
   previousPrice: number;
+  previousPivotIndex: number;
+  previousPivotTime: number;
 };
 
 type SwingBreakPayload = {
@@ -236,6 +246,13 @@ export const detectEvents = (
   const result = computeSwings(candles, params);
   const events: IndicatorEvent<SwingEventPayload>[] = [];
 
+  // The bar a pivot becomes knowable on: `lookback` bars to its right have
+  // closed. computeSwings only returns pivots with that many bars after them.
+  const knowableAt = (point: SwingHigh | SwingLow) => {
+    const index = point.index + result.params.lookback;
+    return { index, candle: candles[index] };
+  };
+
   const addFormedEvent = (point: SwingHigh | SwingLow) => {
     const isHigh = point.type === 'high';
     const definition = isHigh
@@ -245,13 +262,14 @@ export const detectEvents = (
 
     events.push(
       createIndicatorEvent(definition, {
-        candle: point.candle,
-        index: point.index,
+        ...knowableAt(point),
         payload: {
           variant,
           price: point.price,
           swingType: point.type,
           lookback: result.params.lookback,
+          pivotIndex: point.index,
+          pivotTime: point.t,
         },
       }),
     );
@@ -276,13 +294,16 @@ export const detectEvents = (
     if (variant && definition) {
       events.push(
         createIndicatorEvent(definition, {
-          candle: current.candle,
-          index: current.index,
+          ...knowableAt(current),
           payload: {
             variant,
             swingType: 'high',
             currentPrice: current.price,
             previousPrice: previous.price,
+            pivotIndex: current.index,
+            pivotTime: current.t,
+            previousPivotIndex: previous.index,
+            previousPivotTime: previous.t,
           },
         }),
       );
@@ -305,13 +326,16 @@ export const detectEvents = (
     if (variant && definition) {
       events.push(
         createIndicatorEvent(definition, {
-          candle: current.candle,
-          index: current.index,
+          ...knowableAt(current),
           payload: {
             variant,
             swingType: 'low',
             currentPrice: current.price,
             previousPrice: previous.price,
+            pivotIndex: current.index,
+            pivotTime: current.t,
+            previousPivotIndex: previous.index,
+            previousPivotTime: previous.t,
           },
         }),
       );
