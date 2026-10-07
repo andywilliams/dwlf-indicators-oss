@@ -98,22 +98,6 @@ describe('trendline v1 events', () => {
     expect(calmEvents.some((event) => event.id.startsWith('trendline_breach'))).toBe(false);
   });
 
-  it('never emits breach events beyond a line’s end index', () => {
-    const candles = buildMarketData({ withBreak: true });
-    const events = detectEvents(candles, { swingLookback: 2 });
-
-    const breachEvents = events.filter(
-      (event) => event.id === 'trendline_breach_bearish' || event.id === 'trendline_break_bearish',
-    );
-
-    breachEvents.forEach((event) => {
-      expect(event.payload).toBeDefined();
-      if (event.payload) {
-        expect(event.payload.detail.index).toBeLessThanOrEqual(event.payload.endIndex);
-      }
-    });
-  });
-
   it('emits breach events for active lines when price breaks later', () => {
     const candles = buildMarketData({ withBreak: true });
     const events = detectEvents(candles, { swingLookback: 2 });
@@ -126,7 +110,6 @@ describe('trendline v1 events', () => {
     expect(breakEvent).toBeTruthy();
     if (breakEvent && breakEvent.payload?.detail) {
       expect(breakEvent.payload.detail.index).toBeGreaterThan(breakEvent.payload.startIndex);
-      expect(breakEvent.payload.detail.index).toBeLessThanOrEqual(breakEvent.payload.endIndex);
     }
   });
 });

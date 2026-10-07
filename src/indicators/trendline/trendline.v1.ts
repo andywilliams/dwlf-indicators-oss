@@ -344,8 +344,11 @@ export const detectEvents = (
     return count;
   };
 
-  const lineState = new Map<string, LiveLine>();
-  let live: LiveLine[] = [];
+  // The active lines of each direction, carried from one bar to the next. A
+  // line keeps its spent state only while it stays drawn: one that drops out
+  // and is drawn again was not judged in between, so it is checked afresh.
+  let support: LiveLine[] = [];
+  let resistance: LiveLine[] = [];
   let knownLows = 0;
   let knownHighs = 0;
   const events: TrendlineV1Event[] = [];
@@ -360,29 +363,33 @@ export const detectEvents = (
     return false;
   };
 
+  const redraw = (
+    previous: LiveLine[],
+    points: SwingPoint[],
+    groups: SwingPoint[][],
+    direction: 'support' | 'resistance',
+    k: number,
+  ): LiveLine[] => {
+    const carried = new Map(previous.map((entry) => [lineKey(entry.line), entry]));
+    return generateTrendlines(groups, candles, points, direction, k)
+      .filter((line) => line.isActive)
+      .map((line) => carried.get(lineKey(line)) ?? { line, spent: spentBefore(line, k) });
+  };
+
   for (let k = 1; k < candles.length; k += 1) {
     const lowsNow = knownCount(lows, knownLows, k);
-    const highsNow = knownCount(highs, knownHighs, k);
-    if (lowsNow !== knownLows || highsNow !== knownHighs) {
+    if (lowsNow !== knownLows) {
       knownLows = lowsNow;
-      knownHighs = highsNow;
-      const knownLowPoints = lows.slice(0, knownLows);
-      const knownHighPoints = highs.slice(0, knownHighs);
-      const drawn = [
-        ...generateTrendlines(groupUpwardSwingLows(knownLowPoints), candles, knownLowPoints, 'support', k),
-        ...generateTrendlines(groupDownwardSwingHighs(knownHighPoints), candles, knownHighPoints, 'resistance', k),
-      ].filter((line) => line.isActive);
-      live = drawn.map((line) => {
-        const key = lineKey(line);
-        const existing = lineState.get(key);
-        if (existing) {
-          return existing;
-        }
-        const created = { line, spent: spentBefore(line, k) };
-        lineState.set(key, created);
-        return created;
-      });
+      const known = lows.slice(0, knownLows);
+      support = redraw(support, known, groupUpwardSwingLows(known), 'support', k);
     }
+    const highsNow = knownCount(highs, knownHighs, k);
+    if (highsNow !== knownHighs) {
+      knownHighs = highsNow;
+      const known = highs.slice(0, knownHighs);
+      resistance = redraw(resistance, known, groupDownwardSwingHighs(known), 'resistance', k);
+    }
+    const live = [...support, ...resistance];
 
     const best = new Map<string, { event: TrendlineV1Event; distance: number }>();
     for (const entry of live) {

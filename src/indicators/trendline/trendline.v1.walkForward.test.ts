@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { Candle } from '../../types';
+import { computeSwings } from '../swing/swing';
 import { detectEvents } from './trendline.v1';
 
 // A deterministic random walk with enough drift and chop to form many lines
@@ -53,4 +54,47 @@ describe('trendline v1 events are walk-forward stable', () => {
       expect(payload.endIndex).toBe(e.index);
     }
   });
+
+  type Payload = { lineType: 'support' | 'resistance'; startIndex: number; anchorIndex: number; variant: string };
+
+  it('a line stops firing once a pivot that terminates it is knowable', () => {
+    const swingLookback = 3;
+    const candles = walk(400, 3);
+    const { lows, highs } = computeSwings(candles, { lookback: swingLookback });
+    const events = detectEvents(candles, { swingLookback });
+    expect(events.length).toBeGreaterThan(10);
+    for (const e of events) {
+      const payload = e.payload as Payload;
+      const isSupport = payload.lineType === 'support';
+      const pivots = (isSupport ? lows : highs)
+        .filter((p) => p.index >= payload.anchorIndex && p.index + swingLookback <= (e.index as number));
+      // Support ends at the first lower low after its anchor, resistance at the first higher high.
+      let last = pivots[0].price;
+      for (const pivot of pivots.slice(1)) {
+        expect(isSupport ? pivot.price >= last : pivot.price <= last, `${e.id}@${e.index}`).toBe(true);
+        last = pivot.price;
+      }
+    }
+  });
+
+  it('a line closes through at most once and is silent after', () => {
+    for (const [seed, swingLookback] of [[11, 5], [3, 3], [29, 2]]) {
+      const events = detectEvents(walk(400, seed), { swingLookback });
+      const closedAt = new Map<string, number>();
+      for (const e of events) {
+        const payload = e.payload as Payload;
+        const line = `${payload.lineType}:${payload.startIndex}:${payload.anchorIndex}`;
+        const closed = closedAt.get(line);
+        if (closed !== undefined) {
+          expect(e.index, `${line} fired at ${e.index} after closing through at ${closed}`).toBe(closed);
+        }
+        if (payload.variant === 'close') {
+          expect(closed, `${line} closed through twice`).toBeUndefined();
+          closedAt.set(line, e.index as number);
+        }
+      }
+      expect(closedAt.size).toBeGreaterThan(3);
+    }
+  });
 });
+
