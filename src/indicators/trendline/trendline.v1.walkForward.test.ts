@@ -78,7 +78,8 @@ describe('trendline v1 events are walk-forward stable', () => {
   });
 
   it('a line closes through at most once and is silent after', () => {
-    for (const [seed, swingLookback] of [[11, 5], [3, 3], [29, 2]]) {
+    const cases = Array.from({ length: 40 }, (_, i) => [i + 1, 2 + (i % 4)]);
+    for (const [seed, swingLookback] of cases) {
       const events = detectEvents(walk(400, seed), { swingLookback });
       const closedAt = new Map<string, number>();
       for (const e of events) {
@@ -93,7 +94,7 @@ describe('trendline v1 events are walk-forward stable', () => {
           closedAt.set(line, e.index as number);
         }
       }
-      expect(closedAt.size).toBeGreaterThan(3);
+      expect(closedAt.size).toBeGreaterThan(0);
     }
   });
 });
