@@ -84,3 +84,13 @@ describe('EMA events', () => {
     }
   });
 });
+
+describe('EMA cross payload (DWLF-331)', () => {
+  it('carries the average length, so a stored cross names its period', () => {
+    const closes = [10, 10, 10, 10, 10, 9, 8, 12, 13, 14, 9, 8];
+    const candles = closes.map((c, i) => ({ t: i, o: c, h: c, l: c, c, v: 1 }));
+    const events = detectEvents(candles, { length: 3 });
+    expect(events.length).toBeGreaterThan(0);
+    for (const e of events) {expect(e.payload?.length).toBe(3);}
+  });
+});
