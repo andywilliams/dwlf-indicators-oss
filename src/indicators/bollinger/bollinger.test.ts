@@ -188,10 +188,27 @@ describe('Bollinger squeeze, release and re-entry (DWLF-337)', () => {
     for (const event of shifted) {
       const target = event.index as number;
       // The band computed one bar earlier is the one plotted at `target`.
-      const band = bandAt(event.id === 'bollinger.reentry.fromAbove' ? upper : lower, candles[target - 1].t);
+      const fromAbove = event.id === 'bollinger.reentry.fromAbove';
+      const series = fromAbove ? upper : lower;
+      const [band, prevBand] = [bandAt(series, candles[target - 1].t), bandAt(series, candles[target - 2].t)];
       expect((event.payload as BollingerReentryPayload).bandValue).toBe(band);
+      expect(fromAbove ? candles[target - 1].c > prevBand : candles[target - 1].c < prevBand).toBe(true);
+      expect(fromAbove ? candles[target].c <= band : candles[target].c >= band).toBe(true);
     }
     expect(shifted.length).toBeGreaterThan(0);
+  });
+
+  it('moves squeezes and releases with the offset, judging the release side at the plotted bar', () => {
+    const squeezeEvents = (offset: number) => detectEvents(candles, { offset }).filter((e) => e.id.startsWith('bollinger.squeeze'));
+    const [unshifted, shifted] = [squeezeEvents(0), squeezeEvents(1)];
+    const inRange = unshifted.filter((e) => (e.index as number) + 1 < candles.length);
+    expect(shifted.map((e) => [e.id, e.index])).toEqual(inRange.map((e) => [e.id, (e.index as number) + 1]));
+    const { middle } = computeBollingerBands(candles);
+    for (const release of shifted.filter((e) => e.id === 'bollinger.squeeze.released')) {
+      const target = release.index as number;
+      const basis = middle.find((point) => point.t === candles[target - 1].t)?.v as number;
+      expect((release.payload as BollingerSqueezePayload).direction).toBe(candles[target].c >= basis ? 'up' : 'down');
+    }
   });
 
   it('leaves the bands and their resolved params untouched by the event options', () => {
