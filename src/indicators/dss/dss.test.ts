@@ -78,6 +78,82 @@ describe('DSS events', () => {
   });
 });
 
+describe('DSS zone exits and configurable levels (DWLF-337)', () => {
+  const params = { length: 5, smooth1: 3, signal: 2 };
+  const result = computeDSS(smallCandles, params);
+  const byTime = new Map(result.dss.map((point) => [point.t, point.v]));
+  const dssAt = (t: number) => byTime.get(t) as number;
+  // Zone events, like the crosses, start once the signal line exists: the
+  // pairs of consecutive bars that have a DSS value and a signal value.
+  const signalTimes = new Set(result.signal.map((point) => point.t));
+  const gatedPairs = smallCandles.slice(1)
+    .map((candle, k) => [smallCandles[k].t, candle.t])
+    .filter(([a, b]) => byTime.has(a) && byTime.has(b) && signalTimes.has(a) && signalTimes.has(b))
+    .map(([a, b]) => [dssAt(a), dssAt(b)]);
+
+  it('advertises the exit events', () => {
+    expect(getEventDefinitions().map((entry) => entry.id)).toEqual(
+      expect.arrayContaining(['dss.exit.overbought', 'dss.exit.oversold']),
+    );
+  });
+
+  it('fires an exit on each bar the line leaves a zone, and never with an entry on the same bar', () => {
+    const events = detectEvents(smallCandles, params);
+    const exits = events.filter((event) => event.id.startsWith('dss.exit.'));
+    expect(exits.length).toBeGreaterThan(0);
+
+    for (const exit of exits) {
+      const i = exit.index as number;
+      const prev = dssAt(smallCandles[i - 1].t);
+      const now = dssAt(smallCandles[i].t);
+      if (exit.id === 'dss.exit.overbought') {
+        expect(prev).toBeGreaterThan(80);
+        expect(now).toBeLessThanOrEqual(80);
+      } else {
+        expect(prev).toBeLessThan(20);
+        expect(now).toBeGreaterThanOrEqual(20);
+      }
+      expect(exit.payload).toEqual({
+        dss: now,
+        threshold: exit.id === 'dss.exit.overbought' ? 80 : 20,
+        zone: exit.id === 'dss.exit.overbought' ? 'overbought' : 'oversold',
+      });
+      expect(events.some((e) => e.index === i && e.id === exit.id.replace('exit', 'level'))).toBe(false);
+    }
+  });
+
+  it('counts every zone crossing in the series exactly once', () => {
+    let crossings = 0;
+    for (const [prev, now] of gatedPairs) {
+      if ((prev <= 80 && now > 80) || (prev > 80 && now <= 80) || (prev >= 20 && now < 20) || (prev < 20 && now >= 20)) {
+        crossings += 1;
+      }
+    }
+    const zoneEvents = detectEvents(smallCandles, params).filter((e) => e.id.startsWith('dss.level.') || e.id.startsWith('dss.exit.'));
+    expect(zoneEvents).toHaveLength(crossings);
+  });
+
+  it('uses configured levels for both entries and exits', () => {
+    const events = detectEvents(smallCandles, { ...params, overbought: 70, oversold: 30 });
+    const thresholds = new Set(
+      events.filter((e) => e.id.startsWith('dss.level.') || e.id.startsWith('dss.exit.')).map((e) => (e.payload as { threshold: number }).threshold),
+    );
+    expect([...thresholds].sort()).toEqual([30, 70]);
+  });
+
+  it('leaves the DSS values and their resolved params untouched', () => {
+    expect(computeDSS(smallCandles, { ...params, overbought: 70, oversold: 30 } as never)).toEqual(computeDSS(smallCandles, params));
+    const crosses = (p: object) => detectEvents(smallCandles, p).filter((e) => e.id.startsWith('dss.cross.'));
+    expect(crosses({ ...params, overbought: 70, oversold: 30 })).toEqual(crosses(params));
+  });
+
+  it('refuses levels that are not 0 < oversold < overbought < 100', () => {
+    for (const bad of [{ overbought: 100 }, { oversold: 0 }, { overbought: 40, oversold: 60 }, { overbought: Number.NaN }]) {
+      expect(() => detectEvents(smallCandles, { ...params, ...bad })).toThrow(RangeError);
+    }
+  });
+});
+
 describe('DSS incremental state', () => {
   it('matches batch computation when updated sequentially', () => {
     const batch = computeDSS(smallCandles);
