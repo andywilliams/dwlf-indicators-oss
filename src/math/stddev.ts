@@ -1,5 +1,24 @@
 import { assertPositiveInteger, isFiniteNumber } from '../utils/guards';
 
+/**
+ * Population standard deviation of one full window, two-pass: the mean first,
+ * then the squared deviations from it. The one-pass `sumSq/n − mean²` cancels
+ * catastrophically when the values are large relative to their spread (BTC-scale
+ * prices), and a running sum drifts over a long series.
+ */
+const windowDeviation = (window: number[]): number => {
+  let sum = 0;
+  for (const value of window) {
+    sum += value;
+  }
+  const mean = sum / window.length;
+  let squares = 0;
+  for (const value of window) {
+    squares += (value - mean) * (value - mean);
+  }
+  return Math.sqrt(squares / window.length);
+};
+
 export const standardDeviation = (
   values: Array<number | undefined>,
   period: number,
@@ -10,8 +29,6 @@ export const standardDeviation = (
   const buffer: number[] = Array.from({ length: period }, () => 0);
   let filled = 0;
   let index = 0;
-  let sum = 0;
-  let sumSquares = 0;
 
   for (let i = 0; i < values.length; i += 1) {
     const value = values[i];
@@ -19,16 +36,12 @@ export const standardDeviation = (
     if (!isFiniteNumber(value)) {
       filled = 0;
       index = 0;
-      sum = 0;
-      sumSquares = 0;
       continue;
     }
 
     if (filled < period) {
       buffer[filled] = value;
       filled += 1;
-      sum += value;
-      sumSquares += value * value;
 
       if (filled < period) {
         continue;
@@ -36,16 +49,11 @@ export const standardDeviation = (
 
       index = 0;
     } else {
-      const outgoing = buffer[index];
       buffer[index] = value;
-      sum += value - outgoing;
-      sumSquares += value * value - outgoing * outgoing;
       index = (index + 1) % period;
     }
 
-    const mean = sum / period;
-    const variance = sumSquares / period - mean * mean;
-    result[i] = Math.sqrt(Math.max(variance, 0));
+    result[i] = windowDeviation(buffer);
   }
 
   return result;

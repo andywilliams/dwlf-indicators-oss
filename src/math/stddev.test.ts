@@ -24,3 +24,18 @@ describe('standardDeviation', () => {
     expect(result[6]).toBeCloseTo(Math.sqrt(2 / 3), 10);
   });
 });
+
+describe('standardDeviation precision (DWLF-337)', () => {
+  it('is unchanged by a large constant shift, which the one-pass formula is not', () => {
+    const base = Array.from({ length: 60 }, (_, i) => Math.sin(i / 3) * 7 + (i % 5));
+    const shifted = base.map((v) => v + 1e9);
+    const expected = standardDeviation(base, 20);
+    standardDeviation(shifted, 20).forEach((value, i) => {
+      if (expected[i] === undefined) {
+        expect(value).toBeUndefined();
+      } else {
+        expect(value).toBeCloseTo(expected[i], 6);
+      }
+    });
+  });
+});
