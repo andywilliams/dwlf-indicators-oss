@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { Candle } from '../../types';
 import { smallCandles } from '../../../test/fixtures/candles.small';
 import { computeBollingerBands, detectEvents, getEventDefinitions } from './bollinger';
+import type { BollingerReentryPayload, BollingerSqueezePayload } from './bollinger';
 
 describe('computeBollingerBands', () => {
   it('computes Bollinger Bands with an SMA basis by default', () => {
@@ -92,5 +93,125 @@ describe('Bollinger events', () => {
 
     expect(events.some((event) => event.id === 'bollinger.break.aboveUpper')).toBe(true);
     expect(events.some((event) => event.id === 'bollinger.break.belowLower')).toBe(true);
+  });
+});
+
+describe('Bollinger squeeze, release and re-entry (DWLF-337)', () => {
+  // 160 volatile bars, 40 calm ones, then volatile again: one squeeze in the
+  // calm stretch and one release once the swings come back.
+  const wave = (i: number, amplitude: number) => 100 + amplitude * Math.sin(i / 2.3) + (i % 3) * amplitude * 0.2;
+  const closes = [
+    ...Array.from({ length: 160 }, (_, i) => wave(i, 8)),
+    ...Array.from({ length: 40 }, (_, i) => wave(160 + i, 0.3)),
+    ...Array.from({ length: 60 }, (_, i) => 100 + (i + 1) * 1.5 + 8 * Math.sin(i / 2.3)),
+  ];
+  const candles: Candle[] = closes.map((c, i) => ({ t: i * 86_400_000, o: c, h: c + 0.5, l: c - 0.5, c, v: 1 }));
+  const events = detectEvents(candles);
+  const ofId = (id: string) => events.filter((event) => event.id === id);
+
+  it('advertises the new events', () => {
+    expect(getEventDefinitions().map((entry) => entry.id)).toEqual(
+      expect.arrayContaining(['bollinger.squeeze', 'bollinger.squeeze.released', 'bollinger.reentry.fromAbove', 'bollinger.reentry.fromBelow']),
+    );
+  });
+
+  it('squeezes in the calm stretch, once, and releases after it, rising', () => {
+    const inCalm = ofId('bollinger.squeeze').filter((e) => (e.index as number) >= 160 && (e.index as number) < 200);
+    expect(inCalm).toHaveLength(1);
+    const [squeeze] = inCalm;
+    const release = ofId('bollinger.squeeze.released').find((e) => (e.index as number) > (squeeze.index as number));
+    if (!release) {
+      throw new Error('no release after the calm-stretch squeeze');
+    }
+    expect(release.index).toBeGreaterThanOrEqual(200);
+    expect(squeeze.payload as BollingerSqueezePayload).toMatchObject({ threshold: 20 });
+    expect((squeeze.payload as BollingerSqueezePayload).percentile).toBeLessThanOrEqual(20);
+    expect(release.payload as BollingerSqueezePayload).toMatchObject({ threshold: 50, direction: 'up' });
+    expect((release.payload as BollingerSqueezePayload).percentile).toBeGreaterThanOrEqual(50);
+  });
+
+  it('never opens a history on a squeeze event', () => {
+    // Swings that only ever shrink: band width is at the bottom of its range
+    // from the first ranked bar on, so that bar sets the state and nothing fires.
+    const shrinking: Candle[] = Array.from({ length: 120 }, (_, i) => {
+      const c = 100 + (40 - i / 3) * Math.sin(i / 1.7);
+      return { t: i * 86_400_000, o: c, h: c + 0.1, l: c - 0.1, c, v: 1 };
+    });
+    expect(detectEvents(shrinking, { percentileWindow: 20 }).filter((e) => e.id.startsWith('bollinger.squeeze'))).toEqual([]);
+  });
+
+  it('fires alternately: no second squeeze before a release', () => {
+    const sequence = events.filter((e) => e.id.startsWith('bollinger.squeeze')).map((e) => e.id);
+    sequence.forEach((id, k) => {
+      if (k > 0) {
+        expect(id).not.toBe(sequence[k - 1]);
+      }
+    });
+  });
+
+  it('fires a re-entry on the first close back inside after a close outside', () => {
+    const { upper, lower } = computeBollingerBands(candles);
+    const bandAt = (series: typeof upper, t: number) => series.find((point) => point.t === t)?.v;
+    for (const event of [...ofId('bollinger.reentry.fromAbove'), ...ofId('bollinger.reentry.fromBelow')]) {
+      const i = event.index as number;
+      const fromAbove = event.id === 'bollinger.reentry.fromAbove';
+      const band = fromAbove ? upper : lower;
+      const [prevBand, nowBand] = [bandAt(band, candles[i - 1].t) as number, bandAt(band, candles[i].t) as number];
+      expect(fromAbove ? candles[i - 1].c > prevBand : candles[i - 1].c < prevBand).toBe(true);
+      expect(fromAbove ? candles[i].c <= nowBand : candles[i].c >= nowBand).toBe(true);
+      expect(event.payload as BollingerReentryPayload).toEqual({ price: candles[i].c, bandValue: nowBand, band: fromAbove ? 'upper' : 'lower', source: 'close' });
+    }
+    expect(ofId('bollinger.reentry.fromAbove').length + ofId('bollinger.reentry.fromBelow').length).toBeGreaterThan(0);
+  });
+
+  it('keeps events in bar order', () => {
+    const indices = events.map((event) => event.index as number);
+    expect(indices).toEqual([...indices].sort((a, b) => a - b));
+  });
+
+  it('refuses squeeze levels that are not 0 < squeeze < release < 100', () => {
+    for (const bad of [{ squeezePercentile: 0 }, { releasePercentile: 100 }, { squeezePercentile: 60, releasePercentile: 40 }, { percentileWindow: 0 }]) {
+      expect(() => detectEvents(candles, bad)).toThrow(TypeError);
+    }
+  });
+
+  it('refuses levels a window that small can never rank', () => {
+    // Two values rank only 25, 50 or 75: a squeeze at 20 could never fire.
+    expect(() => detectEvents(candles, { percentileWindow: 2 })).toThrow(/must both be reachable/);
+    expect(() => detectEvents(candles, { percentileWindow: 2, squeezePercentile: 25, releasePercentile: 75 })).not.toThrow();
+  });
+
+  it('places re-entries where the band is plotted when it is offset, like the breaks', () => {
+    const shifted = detectEvents(candles, { offset: 1 }).filter((e) => e.id.startsWith('bollinger.reentry.'));
+    const { upper, lower } = computeBollingerBands(candles);
+    const bandAt = (series: typeof upper, t: number) => series.find((point) => point.t === t)?.v as number;
+    for (const event of shifted) {
+      const target = event.index as number;
+      // The band computed one bar earlier is the one plotted at `target`.
+      const fromAbove = event.id === 'bollinger.reentry.fromAbove';
+      const series = fromAbove ? upper : lower;
+      const [band, prevBand] = [bandAt(series, candles[target - 1].t), bandAt(series, candles[target - 2].t)];
+      expect((event.payload as BollingerReentryPayload).bandValue).toBe(band);
+      expect(fromAbove ? candles[target - 1].c > prevBand : candles[target - 1].c < prevBand).toBe(true);
+      expect(fromAbove ? candles[target].c <= band : candles[target].c >= band).toBe(true);
+    }
+    expect(shifted.length).toBeGreaterThan(0);
+  });
+
+  it('moves squeezes and releases with the offset, judging the release side at the plotted bar', () => {
+    const squeezeEvents = (offset: number) => detectEvents(candles, { offset }).filter((e) => e.id.startsWith('bollinger.squeeze'));
+    const [unshifted, shifted] = [squeezeEvents(0), squeezeEvents(1)];
+    const inRange = unshifted.filter((e) => (e.index as number) + 1 < candles.length);
+    expect(shifted.map((e) => [e.id, e.index])).toEqual(inRange.map((e) => [e.id, (e.index as number) + 1]));
+    const { middle } = computeBollingerBands(candles);
+    for (const release of shifted.filter((e) => e.id === 'bollinger.squeeze.released')) {
+      const target = release.index as number;
+      const basis = middle.find((point) => point.t === candles[target - 1].t)?.v as number;
+      expect((release.payload as BollingerSqueezePayload).direction).toBe(candles[target].c >= basis ? 'up' : 'down');
+    }
+  });
+
+  it('leaves the bands and their resolved params untouched by the event options', () => {
+    expect(computeBollingerBands(candles, { squeezePercentile: 10 } as never)).toEqual(computeBollingerBands(candles));
   });
 });

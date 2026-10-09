@@ -24,3 +24,4 @@ export { sma } from './math/sma';
 export { atr, trueRange } from './math/atr';
 export { rollingHighest, rollingLowest } from './math/rolling';
 export { standardDeviation } from './math/stddev';
+export { trailingPercentileRank } from './math/percentile';
