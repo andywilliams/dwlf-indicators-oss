@@ -139,6 +139,10 @@ describe('SMA golden and death crosses (DWLF-337)', () => {
   });
 
   it('leaves the price-cross events as they were', () => {
-    expect(detectEvents(candles, { length: 3 }).every((event) => event.id === 'sma.cross.above' || event.id === 'sma.cross.below')).toBe(true);
+    // The close turns up through its 3-bar average at bar 13 and back down at bar 25.
+    expect(detectEvents(candles, { length: 3 }).map((event) => [event.id, event.index])).toEqual([
+      ['sma.cross.above', 13],
+      ['sma.cross.below', 25],
+    ]);
   });
 });

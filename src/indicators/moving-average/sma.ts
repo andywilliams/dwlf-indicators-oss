@@ -84,6 +84,12 @@ export const computeSMA = (candles: Candle[], params?: MovingAverageParams): Sma
 
 export type { MovingAverageParams, ResolvedMovingAverageParams } from './common';
 
+/**
+ * Every SMA event id. `detectEvents` emits the price crosses
+ * (`sma.cross.above` / `.below`); `detectCrossoverEvents` emits the golden and
+ * death crosses (`sma.cross.golden` / `.death`), whose payload names both
+ * averages instead of one.
+ */
 export const getEventDefinitions = () => Object.values(SMA_EVENT_DEFINITIONS);
 
 export const detectEvents = (
