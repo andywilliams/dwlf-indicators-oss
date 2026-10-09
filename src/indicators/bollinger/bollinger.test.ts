@@ -171,8 +171,27 @@ describe('Bollinger squeeze, release and re-entry (DWLF-337)', () => {
 
   it('refuses squeeze levels that are not 0 < squeeze < release < 100', () => {
     for (const bad of [{ squeezePercentile: 0 }, { releasePercentile: 100 }, { squeezePercentile: 60, releasePercentile: 40 }, { percentileWindow: 0 }]) {
-      expect(() => detectEvents(candles, bad)).toThrow();
+      expect(() => detectEvents(candles, bad)).toThrow(TypeError);
     }
+  });
+
+  it('refuses levels a window that small can never rank', () => {
+    // Two values rank only 25, 50 or 75: a squeeze at 20 could never fire.
+    expect(() => detectEvents(candles, { percentileWindow: 2 })).toThrow(/must both be reachable/);
+    expect(() => detectEvents(candles, { percentileWindow: 2, squeezePercentile: 25, releasePercentile: 75 })).not.toThrow();
+  });
+
+  it('places re-entries where the band is plotted when it is offset, like the breaks', () => {
+    const shifted = detectEvents(candles, { offset: 1 }).filter((e) => e.id.startsWith('bollinger.reentry.'));
+    const { upper, lower } = computeBollingerBands(candles);
+    const bandAt = (series: typeof upper, t: number) => series.find((point) => point.t === t)?.v as number;
+    for (const event of shifted) {
+      const target = event.index as number;
+      // The band computed one bar earlier is the one plotted at `target`.
+      const band = bandAt(event.id === 'bollinger.reentry.fromAbove' ? upper : lower, candles[target - 1].t);
+      expect((event.payload as BollingerReentryPayload).bandValue).toBe(band);
+    }
+    expect(shifted.length).toBeGreaterThan(0);
   });
 
   it('leaves the bands and their resolved params untouched by the event options', () => {

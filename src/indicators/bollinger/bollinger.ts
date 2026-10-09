@@ -75,10 +75,17 @@ const resolveSqueezeLevels = (params: BollingerEventParams = {}): SqueezeLevels 
     percentileWindow: params.percentileWindow ?? SQUEEZE_DEFAULTS.percentileWindow,
   };
   assertPositiveInteger(levels.percentileWindow, 'percentileWindow');
-  const { squeezePercentile: squeeze, releasePercentile: release } = levels;
+  const { squeezePercentile: squeeze, releasePercentile: release, percentileWindow: window } = levels;
   if (!isFiniteNumber(squeeze) || !isFiniteNumber(release) || squeeze <= 0 || release >= 100 || squeeze >= release) {
-    throw new RangeError(
+    throw new TypeError(
       `Squeeze levels must satisfy 0 < squeezePercentile < releasePercentile < 100. Received: squeezePercentile=${squeeze}, releasePercentile=${release}`,
+    );
+  }
+  // A midrank over `window` values spans 50/window to 100 − 50/window; a level
+  // outside that can never be reached, and its event would silently never fire.
+  if (squeeze < 50 / window || release > 100 - 50 / window) {
+    throw new TypeError(
+      `percentileWindow ${window} ranks between ${50 / window} and ${100 - 50 / window}; squeezePercentile=${squeeze} and releasePercentile=${release} must both be reachable`,
     );
   }
   return levels;
@@ -298,11 +305,10 @@ export const detectEvents = (
     }
   }
 
-  const middleValues = computeBasisSeries(series, resolved.length, resolved.basis);
-  const bands = { series, upper: upperValues, middle: middleValues, lower: lowerValues };
+  const bands = { series, upper: upperValues, middle: basisValues, lower: lowerValues };
   events.push(
-    ...detectSqueezeEvents(candles, bands, resolveSqueezeLevels(params)),
-    ...detectReentryEvents(candles, bands, resolved.source),
+    ...detectSqueezeEvents(candles, bands, resolveSqueezeLevels(params), resolveTargetIndex),
+    ...detectReentryEvents(candles, bands, resolved.source, resolveTargetIndex),
   );
   return events.sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
 };
@@ -316,7 +322,9 @@ type BandSeries = {
 
 const bandwidthAt = ({ upper, middle, lower }: BandSeries, i: number): number | undefined => {
   const [u, m, l] = [upper[i], middle[i], lower[i]];
-  return isFiniteNumber(u) && isFiniteNumber(m) && isFiniteNumber(l) && m !== 0 ? (u - l) / m : undefined;
+  // A width relative to a basis at or below zero has no meaning: a wider band
+  // would rank lower and read as a squeeze.
+  return isFiniteNumber(u) && isFiniteNumber(m) && isFiniteNumber(l) && m > 0 ? (u - l) / m : undefined;
 };
 
 /**
@@ -324,13 +332,15 @@ const bandwidthAt = ({ upper, middle, lower }: BandSeries, i: number): number | 
  * trailing window, and is released once it ranks at or above
  * `releasePercentile` — the gap between them stops one squeeze from firing over
  * and over as width hovers at the line. The first ranked bar only sets the
- * state, so a history never opens on an event. These read the bands where they
- * are computed: `offset` shifts the plotted bands, not this.
+ * state, so a history never opens on an event. Like the breaks, an event is
+ * placed where its band is plotted (`offset` bars on) and read against the
+ * price there.
  */
 const detectSqueezeEvents = (
   candles: Candle[],
   bands: BandSeries,
   levels: SqueezeLevels,
+  targetOf: (index: number) => number | null,
 ): IndicatorEvent<BollingerSqueezePayload>[] => {
   const widths = candles.map((_, i) => bandwidthAt(bands, i));
   const ranks = trailingPercentileRank(widths, levels.percentileWindow);
@@ -346,19 +356,25 @@ const detectSqueezeEvents = (
       squeezed = rank <= levels.squeezePercentile;
       continue;
     }
+    const target = targetOf(i);
     if (!squeezed && rank <= levels.squeezePercentile) {
       squeezed = true;
-      events.push(createIndicatorEvent(BOLLINGER_EVENT_DEFINITIONS.SQUEEZE, {
-        candle: candles[i],
-        index: i,
-        payload: { bandwidth: width, percentile: rank, threshold: levels.squeezePercentile },
-      }));
+      if (target !== null) {
+        events.push(createIndicatorEvent(BOLLINGER_EVENT_DEFINITIONS.SQUEEZE, {
+          candle: candles[target],
+          index: target,
+          payload: { bandwidth: width, percentile: rank, threshold: levels.squeezePercentile },
+        }));
+      }
     } else if (squeezed && rank >= levels.releasePercentile) {
       squeezed = false;
-      const [price, middle] = [bands.series[i], bands.middle[i]];
+      if (target === null) {
+        continue;
+      }
+      const [price, middle] = [bands.series[target], bands.middle[i]];
       events.push(createIndicatorEvent(BOLLINGER_EVENT_DEFINITIONS.SQUEEZE_RELEASED, {
-        candle: candles[i],
-        index: i,
+        candle: candles[target],
+        index: target,
         payload: {
           bandwidth: width,
           percentile: rank,
@@ -371,30 +387,39 @@ const detectSqueezeEvents = (
   return events;
 };
 
-/** A close back inside a band after a close outside it, on consecutive bars. */
+/**
+ * A close back inside a band after a close outside it, on consecutive bars.
+ * Aligned like the breaks: the band at `i` against the price where it is
+ * plotted (`offset` bars on).
+ */
 const detectReentryEvents = (
   candles: Candle[],
   bands: BandSeries,
   source: ResolvedBollingerParams['source'],
+  targetOf: (index: number) => number | null,
 ): IndicatorEvent<BollingerReentryPayload>[] => {
   const events: IndicatorEvent<BollingerReentryPayload>[] = [];
   for (let i = 1; i < candles.length; i += 1) {
-    const [price, prevPrice] = [bands.series[i], bands.series[i - 1]];
+    const [target, prevTarget] = [targetOf(i), targetOf(i - 1)];
+    if (target === null || prevTarget === null) {
+      continue;
+    }
+    const [price, prevPrice] = [bands.series[target], bands.series[prevTarget]];
     if (!isFiniteNumber(price) || !isFiniteNumber(prevPrice)) {
       continue;
     }
     const [upper, prevUpper, lower, prevLower] = [bands.upper[i], bands.upper[i - 1], bands.lower[i], bands.lower[i - 1]];
     if (isFiniteNumber(upper) && isFiniteNumber(prevUpper) && prevPrice > prevUpper && price <= upper) {
       events.push(createIndicatorEvent(BOLLINGER_EVENT_DEFINITIONS.REENTRY_FROM_ABOVE, {
-        candle: candles[i],
-        index: i,
+        candle: candles[target],
+        index: target,
         payload: { price, bandValue: upper, band: 'upper', source },
       }));
     }
     if (isFiniteNumber(lower) && isFiniteNumber(prevLower) && prevPrice < prevLower && price >= lower) {
       events.push(createIndicatorEvent(BOLLINGER_EVENT_DEFINITIONS.REENTRY_FROM_BELOW, {
-        candle: candles[i],
-        index: i,
+        candle: candles[target],
+        index: target,
         payload: { price, bandValue: lower, band: 'lower', source },
       }));
     }
