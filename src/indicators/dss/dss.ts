@@ -90,7 +90,14 @@ export type DssThresholdEventPayload = {
   state: 'overbought' | 'oversold';
 };
 
-export type DssEventPayload = DssCrossEventPayload | DssThresholdEventPayload;
+/** The zone the line has just left; it is no longer in it. */
+export type DssZoneExitPayload = {
+  dss: number;
+  threshold: number;
+  zone: 'overbought' | 'oversold';
+};
+
+export type DssEventPayload = DssCrossEventPayload | DssThresholdEventPayload | DssZoneExitPayload;
 
 export const resolveDssParams = (params: DssParams = {}): ResolvedDssParams => {
   const resolved: ResolvedDssParams = {
@@ -216,8 +223,7 @@ export const getEventDefinitions = () => Object.values(DSS_EVENT_DEFINITIONS);
 
 type LevelCrossing = {
   definition: (typeof DSS_EVENT_DEFINITIONS)[keyof typeof DSS_EVENT_DEFINITIONS];
-  threshold: number;
-  state: 'overbought' | 'oversold';
+  payload: DssThresholdEventPayload | DssZoneExitPayload;
 };
 
 /** The zone crossings between two consecutive DSS values: entries and exits. */
@@ -225,16 +231,16 @@ const levelCrossings = (prevDss: number, dss: number, levels: DssLevels): LevelC
   const { overbought, oversold } = levels;
   const crossings: LevelCrossing[] = [];
   if (prevDss <= overbought && dss > overbought) {
-    crossings.push({ definition: DSS_EVENT_DEFINITIONS.ENTER_OVERBOUGHT, threshold: overbought, state: 'overbought' });
+    crossings.push({ definition: DSS_EVENT_DEFINITIONS.ENTER_OVERBOUGHT, payload: { dss, threshold: overbought, state: 'overbought' } });
   }
   if (prevDss > overbought && dss <= overbought) {
-    crossings.push({ definition: DSS_EVENT_DEFINITIONS.EXIT_OVERBOUGHT, threshold: overbought, state: 'overbought' });
+    crossings.push({ definition: DSS_EVENT_DEFINITIONS.EXIT_OVERBOUGHT, payload: { dss, threshold: overbought, zone: 'overbought' } });
   }
   if (prevDss >= oversold && dss < oversold) {
-    crossings.push({ definition: DSS_EVENT_DEFINITIONS.ENTER_OVERSOLD, threshold: oversold, state: 'oversold' });
+    crossings.push({ definition: DSS_EVENT_DEFINITIONS.ENTER_OVERSOLD, payload: { dss, threshold: oversold, state: 'oversold' } });
   }
   if (prevDss < oversold && dss >= oversold) {
-    crossings.push({ definition: DSS_EVENT_DEFINITIONS.EXIT_OVERSOLD, threshold: oversold, state: 'oversold' });
+    crossings.push({ definition: DSS_EVENT_DEFINITIONS.EXIT_OVERSOLD, payload: { dss, threshold: oversold, zone: 'oversold' } });
   }
   return crossings;
 };
@@ -293,14 +299,8 @@ export const detectEvents = (
       );
     }
 
-    for (const { definition, threshold, state } of levelCrossings(prevDss, dss, levels)) {
-      events.push(
-        createIndicatorEvent(definition, {
-          candle: candles[i],
-          index: i,
-          payload: { dss, threshold, state },
-        }),
-      );
+    for (const { definition, payload } of levelCrossings(prevDss, dss, levels)) {
+      events.push(createIndicatorEvent(definition, { candle: candles[i], index: i, payload }));
     }
   }
 

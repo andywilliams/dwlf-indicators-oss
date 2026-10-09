@@ -80,10 +80,16 @@ describe('DSS events', () => {
 
 describe('DSS zone exits and configurable levels (DWLF-337)', () => {
   const params = { length: 5, smooth1: 3, signal: 2 };
-  const points = computeDSS(smallCandles, params).dss;
-  const series = points.map((point) => point.v);
-  const byTime = new Map(points.map((point) => [point.t, point.v]));
+  const result = computeDSS(smallCandles, params);
+  const byTime = new Map(result.dss.map((point) => [point.t, point.v]));
   const dssAt = (t: number) => byTime.get(t) as number;
+  // Zone events, like the crosses, start once the signal line exists: the
+  // pairs of consecutive bars that have a DSS value and a signal value.
+  const signalTimes = new Set(result.signal.map((point) => point.t));
+  const gatedPairs = smallCandles.slice(1)
+    .map((candle, k) => [smallCandles[k].t, candle.t])
+    .filter(([a, b]) => byTime.has(a) && byTime.has(b) && signalTimes.has(a) && signalTimes.has(b))
+    .map(([a, b]) => [dssAt(a), dssAt(b)]);
 
   it('advertises the exit events', () => {
     expect(getEventDefinitions().map((entry) => entry.id)).toEqual(
@@ -107,15 +113,18 @@ describe('DSS zone exits and configurable levels (DWLF-337)', () => {
         expect(prev).toBeLessThan(20);
         expect(now).toBeGreaterThanOrEqual(20);
       }
-      expect(exit.payload).toMatchObject({ threshold: exit.id === 'dss.exit.overbought' ? 80 : 20 });
+      expect(exit.payload).toEqual({
+        dss: now,
+        threshold: exit.id === 'dss.exit.overbought' ? 80 : 20,
+        zone: exit.id === 'dss.exit.overbought' ? 'overbought' : 'oversold',
+      });
       expect(events.some((e) => e.index === i && e.id === exit.id.replace('exit', 'level'))).toBe(false);
     }
   });
 
   it('counts every zone crossing in the series exactly once', () => {
     let crossings = 0;
-    for (let i = 1; i < series.length; i += 1) {
-      const [prev, now] = [series[i - 1], series[i]];
+    for (const [prev, now] of gatedPairs) {
       if ((prev <= 80 && now > 80) || (prev > 80 && now <= 80) || (prev >= 20 && now < 20) || (prev < 20 && now >= 20)) {
         crossings += 1;
       }
