@@ -79,11 +79,12 @@ describe('RSI module', () => {
   });
 
   it('treats a value on the level as back inside, as DSS does', () => {
-    // length 1 with flat closes gives 50; the levels are set around it.
-    const candles = closes([10, 11, 11]); // 100 -> 50
-    const onLevel = detectEvents(candles, { length: 1, overbought: 50 + 1e-9, midline: 40, oversold: 30 });
-    expect(onLevel.map((e) => e.id)).toEqual(['rsi.exit.overbought']);
-    const fromLevel = detectEvents(closes([10, 10, 11]), { length: 1, overbought: 50, midline: 40, oversold: 30 }); // 50 -> 100
-    expect(fromLevel).toEqual([]);
+    // length 1: an up close is 100, a flat close 50, a down close 0. The levels sit on 50.
+    const ob = { length: 1, overbought: 50, midline: 40, oversold: 30 };
+    expect(detectEvents(closes([10, 11, 11]), ob).map((e) => e.id)).toEqual(['rsi.exit.overbought']); // 100 -> 50
+    expect(detectEvents(closes([10, 10, 9]), ob).map((e) => e.id)).toEqual(['rsi.midline.bearish']); // 50 -> 0
+    const os = { length: 1, overbought: 70, midline: 60, oversold: 50 };
+    expect(detectEvents(closes([10, 9, 9]), os).map((e) => e.id)).toEqual(['rsi.exit.oversold']); // 0 -> 50
+    expect(detectEvents(closes([10, 10, 11]), os).map((e) => e.id)).toEqual(['rsi.midline.bullish']); // 50 -> 100
   });
 });

@@ -52,6 +52,7 @@ type DivergencePivot = {
 
 detectDivergences(candles, oscillator: LinePoint[], pivots, {
   idPrefix,               // required, caller-owned: 'rsi' -> 'rsi.divergence.regular.bullish'
+  label = '',             // leads event names; pass the label you register with eventDefinitionsFor. Not hashed
   minBars = 5,            // pivot spacing allowed, inclusive
   maxBars = 120,
   minOscillatorDelta = 0, // oscillator must differ by more than this
