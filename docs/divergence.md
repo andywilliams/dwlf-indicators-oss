@@ -23,14 +23,16 @@ detectEvents(candles, params) => IndicatorEvent<RsiEventPayload>[]
 getEventDefinitions()
 ```
 
-Events, each on the bar whose close completes the crossing (ids mirror `dss.*`):
+Events, each on the bar whose close completes the crossing. Exits reuse the `dss.exit.*` shape and
+meaning; the midline cross is `rsi.midline.*`, not `rsi.cross.*`, because `dss.cross.*` means a
+signal-line cross and RSI has no signal line (that id stays free for one):
 
 | id | when |
 |---|---|
 | `rsi.exit.overbought` | previous ≥ `overbought`, current < `overbought` |
 | `rsi.exit.oversold` | previous ≤ `oversold`, current > `oversold` |
-| `rsi.cross.bullish` | previous < `midline`, current ≥ `midline` |
-| `rsi.cross.bearish` | previous ≥ `midline`, current < `midline` |
+| `rsi.midline.bullish` | previous < `midline`, current ≥ `midline` |
+| `rsi.midline.bearish` | previous ≥ `midline`, current < `midline` |
 
 Exits, not entries: "left oversold" is the actionable read (the 2-Oct review); entries would double
 the count for little. Payload: `{ rsi, previous, level, length }`.
@@ -48,17 +50,24 @@ type DivergencePivot = {
   price?: number;         // defaults to the candle's low (side low) or high (side high)
 };
 
-detectDivergences(candles, oscillator: Array<number | undefined>, pivots, {
+detectDivergences(candles, oscillator: LinePoint[], pivots, {
   idPrefix,               // required, caller-owned: 'rsi' -> 'rsi.divergence.regular.bullish'
   minBars = 5,            // pivot spacing allowed, inclusive
   maxBars = 120,
   minOscillatorDelta = 0, // oscillator must differ by more than this
+  source = {},            // caller's description of oscillator + pivots, e.g. { oscillator: 'rsi', length: 14, pivots: 'cycle' }
 }) => IndicatorEvent<DivergencePayload>[]
 
 eventDefinitionsFor(idPrefix, label) => IndicatorEventDefinition[]   // the four ids for a prefix
 getEventDefinitions() => []                                           // zero-arg contract; no own prefix
-atrZigzagPivots(candles, { atrLength = 14, atrMultiple = 2 }) => DivergencePivot[]   // fallback pivots
 ```
+
+The oscillator is the `LinePoint[]` every line in the package returns (`computeRsi(...).rsi`,
+`computeDSS(...).dss`), so a caller passes it straight in; the module aligns it to `candles` by `t`.
+A candle with no point has no oscillator value, and a pivot there is skipped.
+
+`source` is opaque: it is folded into `paramsHash` and copied to the payload, so a stored row says
+which oscillator settings and pivot source produced it (`LevelInput.meta` does the same).
 
 Ids are `${idPrefix}.divergence.${kind}.${direction}`, the `LevelInteraction` pattern: each
 oscillator owns its ids (so two oscillators diverging on one date are two rows, not a key clash),
@@ -90,19 +99,21 @@ with `index <= k`.
 
 Payload: `kind`, `direction`, `side`, `pivotIndex`, `pivotTime`, `pivotPrice`, `oscillatorValue`,
 `previousPivotIndex`, `previousPivotTime`, `previousPivotPrice`, `previousOscillatorValue`,
-`barsBetween`, `paramsHash`.
+`barsBetween`, `source`, `paramsHash`.
 
-### Fallback pivots
+### Pivots
 
-`atrZigzagPivots` alternates highs and lows: a running extreme is confirmed as a pivot on the first
-bar whose low (for a high) or high (for a low) is `atrMultiple × ATR` away from it, and that bar is
-its `knowableIndex`. It is for callers without a pivot source (the chart outside DWLF, OSS users).
-The platform uses its cycle pivots.
+The module finds no pivots. A caller without its own can pass `Swing.computeSwings` highs and lows,
+with `knowableIndex = index + lookback` (the bar swing events are stamped at). A second pivot
+detector here would disagree with `Swing` on the same chart.
 
 ## Platform use (DWLF; not part of this package)
 
-- **Pivots:** confirmed daily cycle lows and highs from the scheduled jobs' cycle ledger, knowable at
-  their confirm bar; the same source key levels use.
+- **Pivots:** published, unrevoked `cycle.{low,high}.confirmed` rows (daily), knowable at their
+  `confirmTime`; the read key levels and cycle fib already use (`toKeyLevelPivots`). Each event's
+  `source` is `{ oscillator, length or settings, pivots: 'cycle' }`.
+- The executor's legacy `rsi_14` and `cancel_bearish_divergence` (a 10-bar heuristic) are left as
+  they are; converging them is a follow-up once these events have a track record.
 - **Oscillators:** RSI(14) and the platform DSS. Prefixes `rsi` and `dss`, so
   `rsi.divergence.regular.bullish` and `dss.divergence.regular.bullish`.
 - **Attention first** (the `Indicator events` epic guard): stored events, chart markers, briefing.

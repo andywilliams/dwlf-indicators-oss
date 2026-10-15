@@ -41,6 +41,8 @@ const emaEvents = EMA.detectEvents(candles, { length: 8 });
 | `DSSState` | Streaming DSS state tracking |
 | `Bollinger` | Bollinger Bands (upper, middle, lower, %B, bandwidth) |
 | `ATR` | Wilder Average True Range and ATR% of close; `atr.regime.expansion` / `atr.regime.contraction` events when the ATR% percentile over a trailing window (default 100 bars) reaches the top (80) or bottom (20) band, once per episode until it returns past the reset percentile (50) |
+| `RSI` | Wilder Relative Strength Index; `rsi.exit.overbought` / `rsi.exit.oversold` when RSI closes back inside 70 / 30, and `rsi.midline.bullish` / `rsi.midline.bearish` on a close across 50 |
+| `Divergence` | Price vs any oscillator (`LinePoint[]`) at pivots you supply: regular and hidden, bullish and bearish, as `<prefix>.divergence.<kind>.<direction>`, stamped at the bar the later pivot becomes knowable. See `docs/divergence.md` |
 | `LevelInteraction` | How price interacts with levels you supply (horizontal, sloped or zone): formed, approached, tested, rejected, broken, retested, flipped, reclaimed, expired, ATR-scaled and stamped at the bar they become knowable. See `docs/level-interaction.md` |
 | `EMA` | Exponential Moving Average with event detection |
 | `SMA` | Simple Moving Average with event detection |
@@ -57,7 +59,7 @@ const emaEvents = EMA.detectEvents(candles, { length: 8 });
 Low-level building blocks, also exported:
 
 ```typescript
-import { ema, sma, atr, trueRange, rollingHighest, rollingLowest, standardDeviation } from '@dwlf/indicators';
+import { ema, sma, atr, trueRange, rsi, rollingHighest, rollingLowest, standardDeviation } from '@dwlf/indicators';
 ```
 
 ## API Pattern

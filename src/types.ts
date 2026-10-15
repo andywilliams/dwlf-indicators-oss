@@ -37,6 +37,17 @@ export type AtrParams = {
   episodeResetPercentile?: number;
 };
 
+export type RsiParams = {
+  /** Wilder smoothing period. */
+  length?: number;
+  /** Level whose downward crossing fires `rsi.exit.overbought`. */
+  overbought?: number;
+  /** Level whose upward crossing fires `rsi.exit.oversold`. */
+  oversold?: number;
+  /** Level whose crossing fires `rsi.midline.bullish` / `rsi.midline.bearish`. */
+  midline?: number;
+};
+
 export type DssParams = {
   length?: number;
   smooth1?: number;
