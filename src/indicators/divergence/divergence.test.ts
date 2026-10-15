@@ -81,6 +81,13 @@ describe('detectDivergences', () => {
       idPrefix: 'dss',
     });
     expect(hidden.map((e) => e.id)).toEqual(['dss.divergence.hidden.bearish']);
+    expect(hidden[0].name).toBe('Hidden Bearish Divergence');
+    const labelled = detectDivergences(candles, oscillatorOf(candles, { 10: 70, 20: 75 }), [high(10, 110), high(20, 105)], {
+      idPrefix: 'dss',
+      label: 'DSS',
+    });
+    expect(labelled[0].name).toBe(eventDefinitionsFor('dss', 'DSS')[3].name);
+    expect(labelled[0].payload?.paramsHash).toBe(hidden[0].payload?.paramsHash);
   });
 
   it('defaults the price to the candle low or high', () => {

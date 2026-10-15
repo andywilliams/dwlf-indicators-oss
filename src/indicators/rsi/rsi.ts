@@ -13,18 +13,19 @@ const DEFAULT_PARAMS: ResolvedRsiParams = {
   midline: 50,
 };
 
-// Exits share the `dss.exit.*` shape and meaning. The midline cross is not
+// Exits match `dss.exit.*`: the same boundaries (a value on the level is back
+// inside) and the same `threshold` / `zone` payload. The midline cross is not
 // `rsi.cross.*`: `dss.cross.*` means a signal-line cross, and RSI has none.
 const RSI_EVENT_DEFINITIONS = {
   EXIT_OVERBOUGHT: {
     id: 'rsi.exit.overbought',
     name: 'RSI Left Overbought Zone',
-    description: 'RSI closed back below the overbought level after being at or above it.',
+    description: 'RSI closed at or below the overbought level after being above it.',
   },
   EXIT_OVERSOLD: {
     id: 'rsi.exit.oversold',
     name: 'RSI Left Oversold Zone',
-    description: 'RSI closed back above the oversold level after being at or below it.',
+    description: 'RSI closed at or above the oversold level after being below it.',
   },
   MIDLINE_BULLISH: {
     id: 'rsi.midline.bullish',
@@ -71,7 +72,9 @@ export type RsiResult = {
 export type RsiEventPayload = {
   rsi: number;
   previous: number;
-  level: number;
+  threshold: number;
+  /** Exits only: the zone RSI left. */
+  zone?: 'overbought' | 'oversold';
   length: number;
 };
 
@@ -102,20 +105,24 @@ export const detectEvents = (candles: Candle[], params?: RsiParams): IndicatorEv
       continue;
     }
 
-    const fire = (definition: (typeof RSI_EVENT_DEFINITIONS)[keyof typeof RSI_EVENT_DEFINITIONS], level: number) =>
+    const fire = (
+      definition: (typeof RSI_EVENT_DEFINITIONS)[keyof typeof RSI_EVENT_DEFINITIONS],
+      threshold: number,
+      zone?: 'overbought' | 'oversold',
+    ) =>
       events.push(
         createIndicatorEvent(definition, {
           candle: candles[i],
           index: i,
-          payload: { rsi: current, previous, level, length: resolved.length },
+          payload: { rsi: current, previous, threshold, ...(zone ? { zone } : {}), length: resolved.length },
         }),
       );
 
-    if (previous >= resolved.overbought && current < resolved.overbought) {
-      fire(RSI_EVENT_DEFINITIONS.EXIT_OVERBOUGHT, resolved.overbought);
+    if (previous > resolved.overbought && current <= resolved.overbought) {
+      fire(RSI_EVENT_DEFINITIONS.EXIT_OVERBOUGHT, resolved.overbought, 'overbought');
     }
-    if (previous <= resolved.oversold && current > resolved.oversold) {
-      fire(RSI_EVENT_DEFINITIONS.EXIT_OVERSOLD, resolved.oversold);
+    if (previous < resolved.oversold && current >= resolved.oversold) {
+      fire(RSI_EVENT_DEFINITIONS.EXIT_OVERSOLD, resolved.oversold, 'oversold');
     }
     if (previous < resolved.midline && current >= resolved.midline) {
       fire(RSI_EVENT_DEFINITIONS.MIDLINE_BULLISH, resolved.midline);

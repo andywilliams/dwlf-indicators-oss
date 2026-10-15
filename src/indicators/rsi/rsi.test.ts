@@ -74,6 +74,16 @@ describe('RSI module', () => {
       [3, 'rsi.exit.oversold'], // 0 -> 50
       [3, 'rsi.midline.bullish'],
     ]);
-    expect(events[0].payload).toEqual({ rsi: 0, previous: 100, level: 70, length: 1 });
+    expect(events[0].payload).toEqual({ rsi: 0, previous: 100, threshold: 70, zone: 'overbought', length: 1 });
+    expect(events[1].payload).toEqual({ rsi: 0, previous: 100, threshold: 50, length: 1 });
+  });
+
+  it('treats a value on the level as back inside, as DSS does', () => {
+    // length 1 with flat closes gives 50; the levels are set around it.
+    const candles = closes([10, 11, 11]); // 100 -> 50
+    const onLevel = detectEvents(candles, { length: 1, overbought: 50 + 1e-9, midline: 40, oversold: 30 });
+    expect(onLevel.map((e) => e.id)).toEqual(['rsi.exit.overbought']);
+    const fromLevel = detectEvents(closes([10, 10, 11]), { length: 1, overbought: 50, midline: 40, oversold: 30 }); // 50 -> 100
+    expect(fromLevel).toEqual([]);
   });
 });

@@ -20,6 +20,8 @@ export type DivergencePivot = {
 export type DivergenceParams = {
   /** Caller-owned id prefix: 'rsi' gives 'rsi.divergence.regular.bullish'. */
   idPrefix: string;
+  /** Leads each event's name, as in `eventDefinitionsFor(idPrefix, label)`. Not hashed. */
+  label?: string;
   /** Fewest bars between the two pivots, inclusive. */
   minBars?: number;
   /** Most bars between the two pivots, inclusive. */
@@ -116,6 +118,7 @@ export const getEventDefinitions = (): IndicatorEventDefinition[] => [];
 export const resolveDivergenceParams = (params: DivergenceParams): ResolvedDivergenceParams => {
   const resolved: ResolvedDivergenceParams = {
     idPrefix: params?.idPrefix,
+    label: params?.label ?? '',
     minBars: params?.minBars ?? 5,
     maxBars: params?.maxBars ?? 120,
     minOscillatorDelta: params?.minOscillatorDelta ?? 0,
@@ -130,6 +133,9 @@ export const resolveDivergenceParams = (params: DivergenceParams): ResolvedDiver
   }
   if (!isFiniteNumber(resolved.minOscillatorDelta) || resolved.minOscillatorDelta < 0) {
     throw new TypeError(`minOscillatorDelta must be a non-negative number. Received: ${resolved.minOscillatorDelta}`);
+  }
+  if (typeof resolved.label !== 'string') {
+    throw new TypeError('label must be a string.');
   }
   if (resolved.source === null || typeof resolved.source !== 'object' || Array.isArray(resolved.source)) {
     throw new TypeError('source must be a plain object.');
@@ -197,6 +203,43 @@ const resolvePivots = (candles: Candle[], oscillator: LinePoint[], pivots: Diver
   return resolved;
 };
 
+const toEvent = (
+  candles: Candle[],
+  resolved: ResolvedDivergenceParams,
+  paramsHash: string,
+  previous: ResolvedPivot,
+  current: ResolvedPivot,
+): IndicatorEvent<DivergencePayload> | undefined => {
+  const barsBetween = current.index - previous.index;
+  if (barsBetween < resolved.minBars || barsBetween > resolved.maxBars) {
+    return undefined;
+  }
+  const type = classify(previous, current, resolved.minOscillatorDelta);
+  if (!type) {
+    return undefined;
+  }
+  return createIndicatorEvent(definitionFor(resolved.idPrefix, type.kind, type.direction, resolved.label), {
+    candle: candles[current.knowableIndex],
+    index: current.knowableIndex,
+    payload: {
+      kind: type.kind,
+      direction: type.direction,
+      side: current.side,
+      pivotIndex: current.index,
+      pivotTime: candles[current.index].t,
+      pivotPrice: current.price,
+      oscillatorValue: current.value,
+      previousPivotIndex: previous.index,
+      previousPivotTime: candles[previous.index].t,
+      previousPivotPrice: previous.price,
+      previousOscillatorValue: previous.value,
+      barsBetween,
+      source: resolved.source,
+      paramsHash,
+    },
+  });
+};
+
 /**
  * Compares each pivot with the previous pivot on the same side and fires when
  * price and the oscillator disagree:
@@ -218,58 +261,31 @@ export const detectDivergences = (
   params: DivergenceParams,
 ): IndicatorEvent<DivergencePayload>[] => {
   const resolved = resolveDivergenceParams(params);
-  const paramsHash = hashParams(resolved);
+  // The label only names events, so it is left out of the hash.
+  const paramsHash = hashParams({ ...resolved, label: undefined });
   const usable = resolvePivots(candles, oscillator, pivots);
   const events: IndicatorEvent<DivergencePayload>[] = [];
 
-  for (const current of usable) {
-    if (current.knowableIndex >= candles.length) {
-      continue;
-    }
-    let previous: ResolvedPivot | undefined;
-    for (const candidate of usable) {
-      if (
-        candidate.side === current.side
-        && candidate.index < current.index
-        && candidate.knowableIndex <= current.knowableIndex
-        && (!previous || candidate.index > previous.index)
-      ) {
-        previous = candidate;
+  for (const side of ['low', 'high'] as const) {
+    const sidePivots = usable.filter((pivot) => pivot.side === side).sort((a, b) => a.index - b.index);
+    for (let position = 0; position < sidePivots.length; position += 1) {
+      const current = sidePivots[position];
+      if (current.knowableIndex >= candles.length) {
+        continue;
+      }
+      // Walking back by bar, the first earlier pivot already knowable is the latest one.
+      let previous: ResolvedPivot | undefined;
+      for (let back = position - 1; back >= 0 && !previous; back -= 1) {
+        const candidate = sidePivots[back];
+        if (candidate.index < current.index && candidate.knowableIndex <= current.knowableIndex) {
+          previous = candidate;
+        }
+      }
+      const event = previous && toEvent(candles, resolved, paramsHash, previous, current);
+      if (event) {
+        events.push(event);
       }
     }
-    if (!previous) {
-      continue;
-    }
-    const barsBetween = current.index - previous.index;
-    if (barsBetween < resolved.minBars || barsBetween > resolved.maxBars) {
-      continue;
-    }
-    const type = classify(previous, current, resolved.minOscillatorDelta);
-    if (!type) {
-      continue;
-    }
-    events.push(
-      createIndicatorEvent(definitionFor(resolved.idPrefix, type.kind, type.direction), {
-        candle: candles[current.knowableIndex],
-        index: current.knowableIndex,
-        payload: {
-          kind: type.kind,
-          direction: type.direction,
-          side: current.side,
-          pivotIndex: current.index,
-          pivotTime: candles[current.index].t,
-          pivotPrice: current.price,
-          oscillatorValue: current.value,
-          previousPivotIndex: previous.index,
-          previousPivotTime: candles[previous.index].t,
-          previousPivotPrice: previous.price,
-          previousOscillatorValue: previous.value,
-          barsBetween,
-          source: resolved.source,
-          paramsHash,
-        },
-      }),
-    );
   }
 
   return events.sort((a, b) => (a.index ?? 0) - (b.index ?? 0) || (a.payload?.pivotIndex ?? 0) - (b.payload?.pivotIndex ?? 0));

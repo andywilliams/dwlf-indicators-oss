@@ -23,19 +23,19 @@ detectEvents(candles, params) => IndicatorEvent<RsiEventPayload>[]
 getEventDefinitions()
 ```
 
-Events, each on the bar whose close completes the crossing. Exits reuse the `dss.exit.*` shape and
-meaning; the midline cross is `rsi.midline.*`, not `rsi.cross.*`, because `dss.cross.*` means a
+Events, each on the bar whose close completes the crossing. Exits match `dss.exit.*` (a value on the
+level counts as back inside; payload `threshold` and `zone`); the midline cross is `rsi.midline.*`, not `rsi.cross.*`, because `dss.cross.*` means a
 signal-line cross and RSI has no signal line (that id stays free for one):
 
 | id | when |
 |---|---|
-| `rsi.exit.overbought` | previous ≥ `overbought`, current < `overbought` |
-| `rsi.exit.oversold` | previous ≤ `oversold`, current > `oversold` |
+| `rsi.exit.overbought` | previous > `overbought`, current ≤ `overbought` |
+| `rsi.exit.oversold` | previous < `oversold`, current ≥ `oversold` |
 | `rsi.midline.bullish` | previous < `midline`, current ≥ `midline` |
 | `rsi.midline.bearish` | previous ≥ `midline`, current < `midline` |
 
 Exits, not entries: "left oversold" is the actionable read (the 2-Oct review); entries would double
-the count for little. Payload: `{ rsi, previous, level, length }`.
+the count for little. Payload: `{ rsi, previous, threshold, zone (exits only), length }`.
 
 ## Divergence
 
