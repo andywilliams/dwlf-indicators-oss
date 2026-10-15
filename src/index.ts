@@ -3,6 +3,8 @@ export * as DSS from './indicators/dss/dss';
 export * as DSSState from './indicators/dss/dss.state';
 export * as Bollinger from './indicators/bollinger/bollinger';
 export * as ATR from './indicators/atr/atr';
+export * as RSI from './indicators/rsi/rsi';
+export * as Divergence from './indicators/divergence/divergence';
 export * as LevelInteraction from './indicators/level-interaction/levelInteraction';
 export * as SMA from './indicators/moving-average/sma';
 export * as EMA from './indicators/moving-average/ema';
@@ -22,6 +24,7 @@ export { isFiniteNumber, toFiniteOr, clamp, assertPositiveInteger } from './util
 export { ema } from './math/ema';
 export { sma } from './math/sma';
 export { atr, trueRange } from './math/atr';
+export { rsi } from './math/rsi';
 export { rollingHighest, rollingLowest } from './math/rolling';
 export { standardDeviation } from './math/stddev';
 export { trailingPercentileRank } from './math/percentile';
