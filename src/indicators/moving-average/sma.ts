@@ -41,13 +41,13 @@ const SMA_EVENT_DEFINITIONS = {
     id: 'sma.reclaimed',
     name: 'SMA Reclaimed',
     description:
-      'Price, having been below the SMA, closed above it by at least the ATR buffer on enough consecutive bars (default 2 closes, half an ATR).',
+      'Price, settled below the SMA, closed above it by at least the ATR buffer on enough consecutive bars (default 2 closes, half an ATR).',
   },
   LOST: {
     id: 'sma.lost',
     name: 'SMA Lost',
     description:
-      'Price, having been above the SMA, closed below it by at least the ATR buffer on enough consecutive bars (default 2 closes, half an ATR).',
+      'Price, settled above the SMA, closed below it by at least the ATR buffer on enough consecutive bars (default 2 closes, half an ATR).',
   },
 } as const;
 
@@ -91,12 +91,14 @@ export type SmaReclaimParams = {
 export type ResolvedSmaReclaimParams = Required<SmaReclaimParams>;
 
 export type SmaReclaimEventPayload = {
+  /** bullish for `sma.reclaimed`, bearish for `sma.lost`. */
+  direction: 'bullish' | 'bearish';
   price: number;
   average: number;
   atr: number;
   /** (price - average) / atr on the confirming bar: positive for a reclaim, negative for a loss. */
   distanceAtr: number;
-  /** Bars from the start of the previous side to the first confirming close. */
+  /** Bars from the run that settled the previous side to the first close of this run. */
   barsOnPreviousSide: number;
   length: number;
   source: ResolvedMovingAverageParams['source'];
@@ -262,13 +264,19 @@ export const detectCrossoverEvents = (
 };
 
 /**
- * Close-confirmed reclaim and loss of one SMA (DWLF-448). Price holds a side of
- * the average until `confirmBars` consecutive closes sit on the other side by at
- * least `atrMultiple` Wilder ATRs; the side then changes and an event fires on
- * the last of those closes (`sma.reclaimed` upward, `sma.lost` downward). The
- * starting side fires nothing, so the events always alternate. Unlike
- * `sma.cross.above` / `.below`, a close that pokes through and comes straight
- * back is not an event. Each event uses only bars up to the one it is stamped on.
+ * Close-confirmed reclaim and loss of one SMA (DWLF-448). A run of
+ * `confirmBars` consecutive closes on one side of the average, each at least
+ * `atrMultiple` Wilder ATRs beyond it, settles price on that side. When a run
+ * settles price on the opposite side to before, an event fires on the run's last
+ * close: `sma.reclaimed` upward, `sma.lost` downward. The first settled side
+ * fires nothing, so the events alternate, and from that first run on the state
+ * no longer depends on where the candles start. A close that pokes through and
+ * comes straight back is not an event, unlike `sma.cross.above` / `.below`.
+ * Each event uses only bars up to the one it is stamped on.
+ *
+ * "Reclaimed" here is the trader's sense (price won the average back). It is
+ * not LevelInteraction's `reclaimed` kind (a failed break), and `sma` is not a
+ * LevelInteraction prefix.
  */
 export const detectReclaimEvents = (
   candles: Candle[],
@@ -285,50 +293,52 @@ export const detectReclaimEvents = (
   const events: IndicatorEvent<SmaReclaimEventPayload>[] = [];
   let side = 0;
   let sideStart = -1;
-  let streak = 0;
+  let runSide = 0;
+  let run = 0;
 
   for (let i = 0; i < candles.length; i += 1) {
     const [price, average, range] = [series[i], averages[i], ranges[i]];
     if (!isFiniteNumber(price) || !isFiniteNumber(average) || !isFiniteNumber(range)) {
-      streak = 0;
+      run = 0;
       continue;
     }
     const distance = price - average;
-    if (side === 0) {
-      if (distance !== 0) {
-        side = Math.sign(distance);
-        sideStart = i;
-      }
+    const beyond = distance !== 0 && Math.abs(distance) >= resolved.atrMultiple * range ? Math.sign(distance) : 0;
+    if (beyond === 0) {
+      run = 0;
+      continue;
+    }
+    run = beyond === runSide ? run + 1 : 1;
+    runSide = beyond;
+    if (run !== resolved.confirmBars || runSide === side) {
       continue;
     }
 
-    streak = Math.sign(distance) === -side && Math.abs(distance) >= resolved.atrMultiple * range ? streak + 1 : 0;
-    if (streak < resolved.confirmBars) {
-      continue;
+    const runStart = i - resolved.confirmBars + 1;
+    if (side !== 0) {
+      const direction = runSide > 0 ? 'bullish' : 'bearish';
+      events.push(
+        createIndicatorEvent(runSide > 0 ? SMA_EVENT_DEFINITIONS.RECLAIMED : SMA_EVENT_DEFINITIONS.LOST, {
+          candle: candles[i],
+          index: i,
+          payload: {
+            direction,
+            price,
+            average,
+            atr: range,
+            distanceAtr: range > 0 ? distance / range : 0,
+            barsOnPreviousSide: runStart - sideStart,
+            length: resolved.length,
+            source: resolved.source,
+            confirmBars: resolved.confirmBars,
+            atrMultiple: resolved.atrMultiple,
+            atrLength: resolved.atrLength,
+          },
+        }),
+      );
     }
-
-    const firstConfirming = i - resolved.confirmBars + 1;
-    side = -side;
-    events.push(
-      createIndicatorEvent(side > 0 ? SMA_EVENT_DEFINITIONS.RECLAIMED : SMA_EVENT_DEFINITIONS.LOST, {
-        candle: candles[i],
-        index: i,
-        payload: {
-          price,
-          average,
-          atr: range,
-          distanceAtr: range > 0 ? distance / range : 0,
-          barsOnPreviousSide: firstConfirming - sideStart,
-          length: resolved.length,
-          source: resolved.source,
-          confirmBars: resolved.confirmBars,
-          atrMultiple: resolved.atrMultiple,
-          atrLength: resolved.atrLength,
-        },
-      }),
-    );
-    sideStart = firstConfirming;
-    streak = 0;
+    side = runSide;
+    sideStart = runStart;
   }
 
   return events;

@@ -195,7 +195,8 @@ describe('SMA reclaim and loss (DWLF-448)', () => {
       barsOnPreviousSide: 7,
     });
     expect(reclaimed.payload?.distanceAtr).toBeCloseTo((110 - (average as number)) / (reclaimed.payload?.atr as number), 10);
-    expect(lost.payload).toMatchObject({ price: 80, barsOnPreviousSide: 2 });
+    expect(reclaimed.payload?.direction).toBe('bullish');
+    expect(lost.payload).toMatchObject({ direction: 'bearish', price: 80, barsOnPreviousSide: 2 });
     expect(lost.payload?.distanceAtr).toBeLessThan(0);
   });
 
@@ -231,6 +232,26 @@ describe('SMA reclaim and loss (DWLF-448)', () => {
       const prefix = detectReclaimEvents(wave.slice(0, k + 1), params);
       expect(prefix).toEqual(full.filter((event) => (event.index as number) <= k));
     }
+  });
+
+  it('settles on the first confirmed run, so a later start agrees from its first event on', () => {
+    const wave: Candle[] = Array.from({ length: 200 }, (_, t) => {
+      const c = 100 + 12 * Math.sin(t / 9) + 4 * Math.sin(t * 1.7);
+      return { t, o: c, h: c + 1.5, l: c - 1.5, c, v: 1 };
+    });
+    // With no buffer the ATR's own start-up cannot move a decision.
+    const params = { length: 20, atrMultiple: 0 };
+    const key = (event: { id: string; t?: number }) => `${event.id}@${event.t}`;
+    const full = detectReclaimEvents(wave, params).map(key);
+    for (let start = 1; start < 60; start += 1) {
+      const later = detectReclaimEvents(wave.slice(start), params);
+      expect(later.length).toBeGreaterThan(0);
+      const from = later[0].t as number;
+      expect(later.map(key)).toEqual(
+        detectReclaimEvents(wave, params).filter((event) => (event.t as number) >= from).map(key),
+      );
+    }
+    expect(full.length).toBeGreaterThan(2);
   });
 
   it('defaults to the 200-day, two closes, half an ATR', () => {
