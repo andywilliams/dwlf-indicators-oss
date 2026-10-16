@@ -45,7 +45,7 @@ const emaEvents = EMA.detectEvents(candles, { length: 8 });
 | `Divergence` | Price vs any oscillator (`LinePoint[]`) at pivots you supply: regular and hidden, bullish and bearish, as `<prefix>.divergence.<kind>.<direction>`, stamped at the bar the later pivot becomes knowable. See `docs/divergence.md` |
 | `LevelInteraction` | How price interacts with levels you supply (horizontal, sloped or zone): formed, approached, tested, rejected, broken, retested, flipped, reclaimed, expired, ATR-scaled and stamped at the bar they become knowable. See `docs/level-interaction.md` |
 | `EMA` | Exponential Moving Average with event detection |
-| `SMA` | Simple Moving Average with event detection |
+| `SMA` | Simple Moving Average; price crosses (`sma.cross.above` / `.below`), golden and death crosses (`detectCrossoverEvents`), and close-confirmed `sma.reclaimed` / `sma.lost` (`detectReclaimEvents`: 2 closes at least half an ATR beyond the average, by default) |
 | `EMACloud` | EMA cloud/ribbon (alignment, cloud hit) |
 | `Swing` | Swing high/low detection. Formed and higher/lower high/low events are stamped at the bar the pivot becomes knowable (`lookback` bars after it); the pivot is `payload.pivotIndex` / `payload.pivotTime`. Breaks and sweeps are stamped at their own bar |
 | `SwingBreak` | Swing break detection |
