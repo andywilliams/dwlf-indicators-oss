@@ -269,8 +269,10 @@ export const detectCrossoverEvents = (
  * `atrMultiple` Wilder ATRs beyond it, settles price on that side. When a run
  * settles price on the opposite side to before, an event fires on the run's last
  * close: `sma.reclaimed` upward, `sma.lost` downward. The first settled side
- * fires nothing, so the events alternate, and from that first run on the state
- * no longer depends on where the candles start. A close that pokes through and
+ * fires nothing, so the events alternate, and from that first run on the side
+ * no longer depends on where the candles start, except through the Wilder ATR's
+ * own start-up (its memory fades by (1 - 1/atrLength) per bar, so give it some
+ * history before the bars you care about). A close that pokes through and
  * comes straight back is not an event, unlike `sma.cross.above` / `.below`.
  * Each event uses only bars up to the one it is stamped on.
  *
@@ -289,7 +291,7 @@ export const detectReclaimEvents = (
 
   const series = extractSeries(candles, resolved.source);
   const averages = computeSmaArray(series, resolved.length);
-  const ranges = computeAtrArray(candles, resolved.atrLength);
+  const atrs = computeAtrArray(candles, resolved.atrLength);
   const events: IndicatorEvent<SmaReclaimEventPayload>[] = [];
   let side = 0;
   let sideStart = -1;
@@ -297,13 +299,13 @@ export const detectReclaimEvents = (
   let run = 0;
 
   for (let i = 0; i < candles.length; i += 1) {
-    const [price, average, range] = [series[i], averages[i], ranges[i]];
-    if (!isFiniteNumber(price) || !isFiniteNumber(average) || !isFiniteNumber(range)) {
+    const [price, average, atr] = [series[i], averages[i], atrs[i]];
+    if (!isFiniteNumber(price) || !isFiniteNumber(average) || !isFiniteNumber(atr)) {
       run = 0;
       continue;
     }
     const distance = price - average;
-    const beyond = distance !== 0 && Math.abs(distance) >= resolved.atrMultiple * range ? Math.sign(distance) : 0;
+    const beyond = distance !== 0 && Math.abs(distance) >= resolved.atrMultiple * atr ? Math.sign(distance) : 0;
     if (beyond === 0) {
       run = 0;
       continue;
@@ -325,8 +327,8 @@ export const detectReclaimEvents = (
             direction,
             price,
             average,
-            atr: range,
-            distanceAtr: range > 0 ? distance / range : 0,
+            atr,
+            distanceAtr: atr > 0 ? distance / atr : 0,
             barsOnPreviousSide: runStart - sideStart,
             length: resolved.length,
             source: resolved.source,

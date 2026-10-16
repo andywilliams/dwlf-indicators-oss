@@ -211,6 +211,17 @@ describe('SMA reclaim and loss (DWLF-448)', () => {
     expect(detectReclaimEvents(shallow, unbuffered).map((event) => event.index)).toEqual([36]);
   });
 
+  it('restarts the run when a close falls inside the buffer', () => {
+    const base = [...Array.from({ length: 30 }, () => 100), ...Array.from({ length: 5 }, () => 90)];
+    const build = (tail: number[]): Candle[] =>
+      [...base, ...tail].map((c, t) => ({ t, o: c, h: c + 3, l: c - 3, c, v: 1 }));
+    const params = { length: 20 };
+    // Beyond, inside the buffer, beyond: never two in a row, so nothing fires...
+    expect(detectReclaimEvents(build([115, 99, 115]), params)).toEqual([]);
+    // ...until a second beyond close follows.
+    expect(detectReclaimEvents(build([115, 99, 115, 115]), params).map((event) => event.index)).toEqual([38]);
+  });
+
   it('honours confirmBars', () => {
     expect(detectReclaimEvents(candles, { ...unbuffered, confirmBars: 1 }).map((event) => [event.id, event.index])).toEqual([
       ['sma.reclaimed', 35],
