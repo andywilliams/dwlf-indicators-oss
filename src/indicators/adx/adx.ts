@@ -30,7 +30,7 @@ const ADX_EVENT_DEFINITIONS = {
   TREND_FADED: {
     id: 'adx.trend.faded',
     name: 'ADX Trend Faded',
-    description: 'ADX fell below the fade level (20 by default) after a trend start: price is ranging again.',
+    description: 'ADX fell below the fade level (20 by default) while trending: price is ranging again.',
   },
   DI_CROSS_BULLISH: {
     id: 'adx.di.cross.bullish',
@@ -108,10 +108,10 @@ export const getEventDefinitions = () => Object.values(ADX_EVENT_DEFINITIONS);
  *   it (`adx.trend.started.bullish` / `.bearish`, by which DI is on top);
  * - trending → ranging when ADX closes below `fadeLevel` (`adx.trend.faded`).
  * Between the two levels nothing changes, so ADX hovering near one level does
- * not flicker. The first ADX value sets the state without an event, and a trend
- * already under way there fades silently, so every `adx.trend.faded` follows a
- * start in the same run. A gap in the series starts the state again, as the DMI
- * math does.
+ * not flicker. The first ADX value sets the state without an event; a trend
+ * already under way there still reports its fade (its start lies before the
+ * candles), so a run that starts mid-trend agrees with one that saw the start.
+ * A gap in the series starts the state again, as the DMI math does.
  * `adx.di.cross.*` fire when the DIs change sides while ADX is at or above
  * `crossMinAdx`; a bar where they are equal is on neither side.
  * Each event uses only bars up to the one it is stamped on. Runs that start on
@@ -125,9 +125,8 @@ export const detectEvents = (candles: Candle[], params?: AdxParams): IndicatorEv
   const resolved = resolveAdxParams(params);
   const { adx, plusDI, minusDI } = dmi(candles, resolved.length);
   const events: IndicatorEvent<AdxEventPayload>[] = [];
-  // undefined: no ADX yet (or after a gap). `announced`: the trend began with a start event.
+  // undefined: no ADX yet (or after a gap).
   let trending: boolean | undefined;
-  let announced = false;
   let trendDirection: 'bullish' | 'bearish' = 'bullish';
   // The side the DIs were last on (+1 / -1), ignoring bars where they are equal.
   let diSide = 0;
@@ -174,11 +173,9 @@ export const detectEvents = (candles: Candle[], params?: AdxParams): IndicatorEv
 
     if (trending === undefined || !isFiniteNumber(previous)) {
       trending = current >= resolved.trendLevel;
-      announced = false;
       trendDirection = direction;
     } else if (!trending && previous < resolved.trendLevel && current >= resolved.trendLevel) {
       trending = true;
-      announced = true;
       trendDirection = direction;
       fire(
         direction === 'bullish' ? ADX_EVENT_DEFINITIONS.TREND_STARTED_BULLISH : ADX_EVENT_DEFINITIONS.TREND_STARTED_BEARISH,
@@ -187,10 +184,7 @@ export const detectEvents = (candles: Candle[], params?: AdxParams): IndicatorEv
       );
     } else if (trending && current < resolved.fadeLevel) {
       trending = false;
-      if (announced) {
-        fire(ADX_EVENT_DEFINITIONS.TREND_FADED, trendDirection, resolved.fadeLevel);
-      }
-      announced = false;
+      fire(ADX_EVENT_DEFINITIONS.TREND_FADED, trendDirection, resolved.fadeLevel);
     }
 
     if (crossed && current >= resolved.crossMinAdx) {

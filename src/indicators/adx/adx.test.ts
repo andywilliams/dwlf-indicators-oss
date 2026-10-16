@@ -158,18 +158,13 @@ describe('ADX', () => {
     expect(detectEvents(candles, { length: 1, crossMinAdx: 0 }).filter((e) => e.id.startsWith('adx.di.'))).toEqual([]);
   });
 
-  it('never fades a trend it did not announce', () => {
-    // Starting mid-climb, ADX is already above 25 on its first bar: that trend fades silently.
+  it('a run that starts mid-trend still reports the fade, as the full run does', () => {
+    // Starting mid-climb, ADX is already above 25 on its first bar: no start, but the same fade.
     const midClimb = regime.slice(75);
-    const trend = detectEvents(midClimb).filter((e) => e.id.startsWith('adx.trend.'));
-    expect(trend[0]?.id).toMatch(/^adx\.trend\.started\./);
-    for (const run of [regime, midClimb]) {
-      let open = false;
-      for (const event of detectEvents(run).filter((e) => e.id.startsWith('adx.trend.'))) {
-        if (event.id === 'adx.trend.faded') {expect(open).toBe(true);}
-        open = event.id !== 'adx.trend.faded';
-      }
-    }
+    const fadesOf = (run: Candle[]) => detectEvents(run).filter((e) => e.id === 'adx.trend.faded').map((e) => e.t);
+    const fullFades = fadesOf(regime).filter((t) => (t as number) >= midClimb[0].t);
+    expect(fadesOf(midClimb)).toEqual(fullFades);
+    expect(detectEvents(midClimb).find((e) => e.id.startsWith('adx.trend.'))?.id).toBe('adx.trend.faded');
   });
 
   it('does not start again while trending when ADX dips between the levels and recovers', () => {
