@@ -80,7 +80,8 @@ export type AdxEventPayload = {
   /** bullish when +DI is above -DI on the bar, bearish when below; faded carries the side it faded from. */
   direction: 'bullish' | 'bearish';
   adx: number;
-  previousAdx: number;
+  /** ADX on the previous bar; absent on the first bar with an ADX value. */
+  previousAdx?: number;
   plusDI: number;
   minusDI: number;
   /** Trend events only: the level crossed. */
@@ -106,37 +107,50 @@ export const getEventDefinitions = () => Object.values(ADX_EVENT_DEFINITIONS);
  * - ranging → trending when ADX closes at or above `trendLevel` after being below
  *   it (`adx.trend.started.bullish` / `.bearish`, by which DI is on top);
  * - trending → ranging when ADX closes below `fadeLevel` (`adx.trend.faded`).
- * The first ADX value sets the state without an event (trending if it is at or
- * above `trendLevel`), and a gap in the series starts it again, as the DMI does.
- * Give it history: ADX needs 2 * length - 1 bars to start, its Wilder smoothing
- * forgets its start by about (1 - 1/length) per bar, and the state agrees across
- * window starts from the first trend start or fade they share. A 400-bar daily
- * window is ample. `adx.trend.faded` names no side in its id (price is ranging
- * again); its payload `direction` is the side of the trend that faded.
- * `adx.di.cross.*` fire when the DIs cross while ADX is at or above `crossMinAdx`.
- * Each event uses only bars up to the one it is stamped on.
+ * Between the two levels nothing changes, so ADX hovering near one level does
+ * not flicker. The first ADX value sets the state without an event, and a trend
+ * already under way there fades silently, so every `adx.trend.faded` follows a
+ * start in the same run. A gap in the series starts the state again, as the DMI
+ * math does.
+ * `adx.di.cross.*` fire when the DIs change sides while ADX is at or above
+ * `crossMinAdx`; a bar where they are equal is on neither side.
+ * Each event uses only bars up to the one it is stamped on. Runs that start on
+ * different bars agree once the Wilder smoothing has forgotten its start (it
+ * decays by about (1 - 1/length) per bar; 150 bars is ample at 14), so give the
+ * detector history: a 400-bar daily window is plenty.
+ * `adx.trend.faded` names no side in its id (price is ranging again); its
+ * payload `direction` is the side of the trend that faded.
  */
 export const detectEvents = (candles: Candle[], params?: AdxParams): IndicatorEvent<AdxEventPayload>[] => {
   const resolved = resolveAdxParams(params);
   const { adx, plusDI, minusDI } = dmi(candles, resolved.length);
   const events: IndicatorEvent<AdxEventPayload>[] = [];
+  // undefined: no ADX yet (or after a gap). `announced`: the trend began with a start event.
   let trending: boolean | undefined;
+  let announced = false;
   let trendDirection: 'bullish' | 'bearish' = 'bullish';
+  // The side the DIs were last on (+1 / -1), ignoring bars where they are equal.
+  let diSide = 0;
 
   for (let i = 0; i < candles.length; i += 1) {
-    const [current, plus, minus] = [adx[i], plusDI[i], minusDI[i]];
-    if (!isFiniteNumber(current) || !isFiniteNumber(plus) || !isFiniteNumber(minus)) {
+    const [plus, minus] = [plusDI[i], minusDI[i]];
+    if (!isFiniteNumber(plus) || !isFiniteNumber(minus)) {
       trending = undefined;
+      diSide = 0;
       continue;
     }
-    const previous = adx[i - 1];
-    if (trending === undefined || !isFiniteNumber(previous)) {
-      trending = current >= resolved.trendLevel;
-      trendDirection = plus >= minus ? 'bullish' : 'bearish';
+    const side = Math.sign(plus - minus);
+    const crossed = side !== 0 && diSide !== 0 && side !== diSide;
+    if (side !== 0) {
+      diSide = side;
+    }
+    const current = adx[i];
+    if (!isFiniteNumber(current)) {
       continue;
     }
 
-    const direction = plus >= minus ? 'bullish' : 'bearish';
+    const previous = adx[i - 1];
+    const direction: 'bullish' | 'bearish' = diSide >= 0 ? 'bullish' : 'bearish';
     const fire = (
       definition: (typeof ADX_EVENT_DEFINITIONS)[keyof typeof ADX_EVENT_DEFINITIONS],
       eventDirection: 'bullish' | 'bearish',
@@ -149,7 +163,7 @@ export const detectEvents = (candles: Candle[], params?: AdxParams): IndicatorEv
           payload: {
             direction: eventDirection,
             adx: current,
-            previousAdx: previous,
+            ...(isFiniteNumber(previous) ? { previousAdx: previous } : {}),
             plusDI: plus,
             minusDI: minus,
             ...(threshold === undefined ? {} : { threshold }),
@@ -158,8 +172,13 @@ export const detectEvents = (candles: Candle[], params?: AdxParams): IndicatorEv
         }),
       );
 
-    if (!trending && previous < resolved.trendLevel && current >= resolved.trendLevel) {
+    if (trending === undefined || !isFiniteNumber(previous)) {
+      trending = current >= resolved.trendLevel;
+      announced = false;
+      trendDirection = direction;
+    } else if (!trending && previous < resolved.trendLevel && current >= resolved.trendLevel) {
       trending = true;
+      announced = true;
       trendDirection = direction;
       fire(
         direction === 'bullish' ? ADX_EVENT_DEFINITIONS.TREND_STARTED_BULLISH : ADX_EVENT_DEFINITIONS.TREND_STARTED_BEARISH,
@@ -168,16 +187,14 @@ export const detectEvents = (candles: Candle[], params?: AdxParams): IndicatorEv
       );
     } else if (trending && current < resolved.fadeLevel) {
       trending = false;
-      fire(ADX_EVENT_DEFINITIONS.TREND_FADED, trendDirection, resolved.fadeLevel);
+      if (announced) {
+        fire(ADX_EVENT_DEFINITIONS.TREND_FADED, trendDirection, resolved.fadeLevel);
+      }
+      announced = false;
     }
 
-    const [previousPlus, previousMinus] = [plusDI[i - 1], minusDI[i - 1]];
-    if (current >= resolved.crossMinAdx && isFiniteNumber(previousPlus) && isFiniteNumber(previousMinus)) {
-      if (previousPlus <= previousMinus && plus > minus) {
-        fire(ADX_EVENT_DEFINITIONS.DI_CROSS_BULLISH, 'bullish');
-      } else if (previousPlus >= previousMinus && plus < minus) {
-        fire(ADX_EVENT_DEFINITIONS.DI_CROSS_BEARISH, 'bearish');
-      }
+    if (crossed && current >= resolved.crossMinAdx) {
+      fire(side > 0 ? ADX_EVENT_DEFINITIONS.DI_CROSS_BULLISH : ADX_EVENT_DEFINITIONS.DI_CROSS_BEARISH, side > 0 ? 'bullish' : 'bearish');
     }
   }
 
