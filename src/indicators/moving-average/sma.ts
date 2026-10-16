@@ -1,5 +1,6 @@
 import type { Candle, IndicatorEvent, LinePoint } from '../../types';
 import { sma as computeSmaArray } from '../../math/sma';
+import { atr as computeAtrArray } from '../../math/atr';
 import {
   extractSeries,
   resolveMovingAverageParams,
@@ -36,6 +37,18 @@ const SMA_EVENT_DEFINITIONS = {
     name: 'Death Cross',
     description: 'The fast SMA (default 50) moved from at/above the slow SMA (default 200) to below it.',
   },
+  RECLAIMED: {
+    id: 'sma.reclaimed',
+    name: 'SMA Reclaimed',
+    description:
+      'Price, settled below the SMA, closed above it by at least the ATR buffer on enough consecutive bars (default 2 closes, half an ATR).',
+  },
+  LOST: {
+    id: 'sma.lost',
+    name: 'SMA Lost',
+    description:
+      'Price, settled above the SMA, closed below it by at least the ATR buffer on enough consecutive bars (default 2 closes, half an ATR).',
+  },
 } as const;
 
 export type SmaCrossEventPayload = {
@@ -63,6 +76,54 @@ export type SmaCrossoverEventPayload = {
   source: ResolvedMovingAverageParams['source'];
 };
 
+export type SmaReclaimParams = {
+  /** Period of the average. Default 200. */
+  length?: number;
+  source?: MovingAverageParams['source'];
+  /** Consecutive closes beyond the buffer that confirm the change of side. Default 2. */
+  confirmBars?: number;
+  /** The buffer, in ATRs: a close counts only when it is at least this far beyond the average. Default 0.5. */
+  atrMultiple?: number;
+  /** Period of the Wilder ATR the buffer is measured in. Default 14. */
+  atrLength?: number;
+};
+
+export type ResolvedSmaReclaimParams = Required<SmaReclaimParams>;
+
+export type SmaReclaimEventPayload = {
+  /** bullish for `sma.reclaimed`, bearish for `sma.lost`. */
+  direction: 'bullish' | 'bearish';
+  price: number;
+  average: number;
+  atr: number;
+  /** (price - average) / atr on the confirming bar: positive for a reclaim, negative for a loss. */
+  distanceAtr: number;
+  /** Bars from the run that settled the previous side to the first close of this run. */
+  barsOnPreviousSide: number;
+  length: number;
+  source: ResolvedMovingAverageParams['source'];
+  confirmBars: number;
+  atrMultiple: number;
+  atrLength: number;
+};
+
+export const resolveSmaReclaimParams = (params: SmaReclaimParams = {}): ResolvedSmaReclaimParams => {
+  const resolved: ResolvedSmaReclaimParams = {
+    length: params.length ?? 200,
+    source: params.source ?? 'close',
+    confirmBars: params.confirmBars ?? 2,
+    atrMultiple: params.atrMultiple ?? 0.5,
+    atrLength: params.atrLength ?? 14,
+  };
+  assertPositiveInteger(resolved.length, 'length');
+  assertPositiveInteger(resolved.confirmBars, 'confirmBars');
+  assertPositiveInteger(resolved.atrLength, 'atrLength');
+  if (!isFiniteNumber(resolved.atrMultiple) || resolved.atrMultiple < 0) {
+    throw new RangeError(`atrMultiple must be a non-negative number. Received: ${resolved.atrMultiple}`);
+  }
+  return resolved;
+};
+
 export const computeSMA = (candles: Candle[], params?: MovingAverageParams): SmaResult => {
   const resolved = resolveMovingAverageParams(params);
 
@@ -88,7 +149,8 @@ export type { MovingAverageParams, ResolvedMovingAverageParams } from './common'
  * Every SMA event id. `detectEvents` emits the price crosses
  * (`sma.cross.above` / `.below`); `detectCrossoverEvents` emits the golden and
  * death crosses (`sma.cross.golden` / `.death`), whose payload names both
- * averages instead of one.
+ * averages instead of one; `detectReclaimEvents` emits the close-confirmed
+ * `sma.reclaimed` / `sma.lost`.
  */
 export const getEventDefinitions = () => Object.values(SMA_EVENT_DEFINITIONS);
 
@@ -196,6 +258,89 @@ export const detectCrossoverEvents = (
         }),
       );
     }
+  }
+
+  return events;
+};
+
+/**
+ * Close-confirmed reclaim and loss of one SMA (DWLF-448). A run of
+ * `confirmBars` consecutive closes on one side of the average, each at least
+ * `atrMultiple` Wilder ATRs beyond it, settles price on that side. When a run
+ * settles price on the opposite side to before, an event fires on the run's last
+ * close: `sma.reclaimed` upward, `sma.lost` downward. The first settled side
+ * fires nothing, so the events alternate, and from that first run on the side
+ * no longer depends on where the candles start, except through the Wilder ATR's
+ * own start-up (its memory fades by (1 - 1/atrLength) per bar, so give it some
+ * history before the bars you care about). A close that pokes through and
+ * comes straight back is not an event, unlike `sma.cross.above` / `.below`.
+ * Each event uses only bars up to the one it is stamped on.
+ *
+ * "Reclaimed" here is the trader's sense (price won the average back). It is
+ * not LevelInteraction's `reclaimed` kind (a failed break), and `sma` is not a
+ * LevelInteraction prefix.
+ */
+export const detectReclaimEvents = (
+  candles: Candle[],
+  params?: SmaReclaimParams,
+): IndicatorEvent<SmaReclaimEventPayload>[] => {
+  const resolved = resolveSmaReclaimParams(params);
+  if (!candles.length) {
+    return [];
+  }
+
+  const series = extractSeries(candles, resolved.source);
+  const averages = computeSmaArray(series, resolved.length);
+  const atrs = computeAtrArray(candles, resolved.atrLength);
+  const events: IndicatorEvent<SmaReclaimEventPayload>[] = [];
+  let side = 0;
+  let sideStart = -1;
+  let runSide = 0;
+  let run = 0;
+
+  for (let i = 0; i < candles.length; i += 1) {
+    const [price, average, atr] = [series[i], averages[i], atrs[i]];
+    if (!isFiniteNumber(price) || !isFiniteNumber(average) || !isFiniteNumber(atr)) {
+      run = 0;
+      continue;
+    }
+    const distance = price - average;
+    const beyond = distance !== 0 && Math.abs(distance) >= resolved.atrMultiple * atr ? Math.sign(distance) : 0;
+    if (beyond === 0) {
+      run = 0;
+      continue;
+    }
+    run = beyond === runSide ? run + 1 : 1;
+    runSide = beyond;
+    if (run !== resolved.confirmBars || runSide === side) {
+      continue;
+    }
+
+    const runStart = i - resolved.confirmBars + 1;
+    if (side !== 0) {
+      const direction = runSide > 0 ? 'bullish' : 'bearish';
+      events.push(
+        createIndicatorEvent(runSide > 0 ? SMA_EVENT_DEFINITIONS.RECLAIMED : SMA_EVENT_DEFINITIONS.LOST, {
+          candle: candles[i],
+          index: i,
+          payload: {
+            direction,
+            price,
+            average,
+            atr,
+            distanceAtr: atr > 0 ? distance / atr : 0,
+            barsOnPreviousSide: runStart - sideStart,
+            length: resolved.length,
+            source: resolved.source,
+            confirmBars: resolved.confirmBars,
+            atrMultiple: resolved.atrMultiple,
+            atrLength: resolved.atrLength,
+          },
+        }),
+      );
+    }
+    side = runSide;
+    sideStart = runStart;
   }
 
   return events;

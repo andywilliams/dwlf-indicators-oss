@@ -2,7 +2,13 @@ import { describe, expect, it } from 'vitest';
 
 import type { Candle } from '../../types';
 import { smallCandles } from '../../../test/fixtures/candles.small';
-import { computeSMA, detectCrossoverEvents, detectEvents, getEventDefinitions } from './sma';
+import {
+  computeSMA,
+  detectCrossoverEvents,
+  detectEvents,
+  detectReclaimEvents,
+  getEventDefinitions,
+} from './sma';
 
 describe('computeSMA', () => {
   it('computes a simple moving average of closes by default', () => {
@@ -144,5 +150,136 @@ describe('SMA golden and death crosses (DWLF-337)', () => {
       ['sma.cross.above', 13],
       ['sma.cross.below', 25],
     ]);
+  });
+});
+
+describe('SMA reclaim and loss (DWLF-448)', () => {
+  const flat = (c: number) => ({ o: c, h: c, l: c, c, v: 1 });
+  // A 20-bar average at 100. Price drops below (the starting side, no event),
+  // pokes above for one close and falls back, then closes above twice (reclaimed
+  // at bar 38), then below twice (lost at bar 40).
+  const closes = [
+    ...Array.from({ length: 30 }, () => 100),
+    ...Array.from({ length: 5 }, () => 90),
+    110, 90, 110, 110, 80, 80,
+  ];
+  const candles: Candle[] = closes.map((c, t) => ({ t, ...flat(c) }));
+  const unbuffered = { length: 20, atrMultiple: 0 };
+
+  it('advertises sma.reclaimed and sma.lost', () => {
+    expect(getEventDefinitions().map((entry) => entry.id)).toEqual(
+      expect.arrayContaining(['sma.reclaimed', 'sma.lost']),
+    );
+  });
+
+  it('fires on the confirming close, not on a one-bar poke, and alternates', () => {
+    expect(detectReclaimEvents(candles, unbuffered).map((event) => [event.id, event.index])).toEqual([
+      ['sma.reclaimed', 38],
+      ['sma.lost', 40],
+    ]);
+    // The raw cross fires on the poke and its reversal as well.
+    expect(detectEvents(candles, { length: 20 }).filter((event) => (event.index as number) >= 35)).toHaveLength(4);
+  });
+
+  it('carries the average, ATR and how long the previous side held', () => {
+    const [reclaimed, lost] = detectReclaimEvents(candles, unbuffered);
+    const average = computeSMA(candles, { length: 20 }).sma.find((point) => point.t === 38)?.v;
+    expect(reclaimed.payload).toMatchObject({
+      price: 110,
+      average,
+      length: 20,
+      source: 'close',
+      confirmBars: 2,
+      atrMultiple: 0,
+      atrLength: 14,
+      barsOnPreviousSide: 7,
+    });
+    expect(reclaimed.payload?.distanceAtr).toBeCloseTo((110 - (average as number)) / (reclaimed.payload?.atr as number), 10);
+    expect(reclaimed.payload?.direction).toBe('bullish');
+    expect(lost.payload).toMatchObject({ direction: 'bearish', price: 80, barsOnPreviousSide: 2 });
+    expect(lost.payload?.distanceAtr).toBeLessThan(0);
+  });
+
+  it('needs every confirming close to clear the ATR buffer', () => {
+    // Closes of 99 sit 1.6 above the average; with 6-point bars, half an ATR is 3.
+    const shallow: Candle[] = [
+      ...Array.from({ length: 30 }, () => 100),
+      ...Array.from({ length: 5 }, () => 90),
+      99, 99, 99,
+    ].map((c, t) => ({ t, o: c, h: c + 3, l: c - 3, c, v: 1 }));
+    expect(detectReclaimEvents(shallow, { length: 20 })).toEqual([]);
+    expect(detectReclaimEvents(shallow, unbuffered).map((event) => event.index)).toEqual([36]);
+  });
+
+  it('restarts the run when a close falls inside the buffer', () => {
+    const base = [...Array.from({ length: 30 }, () => 100), ...Array.from({ length: 5 }, () => 90)];
+    const build = (tail: number[]): Candle[] =>
+      [...base, ...tail].map((c, t) => ({ t, o: c, h: c + 3, l: c - 3, c, v: 1 }));
+    const params = { length: 20 };
+    // Beyond, inside the buffer, beyond: never two in a row, so nothing fires...
+    expect(detectReclaimEvents(build([115, 99, 115]), params)).toEqual([]);
+    // ...until a second beyond close follows.
+    expect(detectReclaimEvents(build([115, 99, 115, 115]), params).map((event) => event.index)).toEqual([38]);
+  });
+
+  it('honours confirmBars', () => {
+    expect(detectReclaimEvents(candles, { ...unbuffered, confirmBars: 1 }).map((event) => [event.id, event.index])).toEqual([
+      ['sma.reclaimed', 35],
+      ['sma.lost', 36],
+      ['sma.reclaimed', 37],
+      ['sma.lost', 39],
+    ]);
+  });
+
+  it('uses no later bar: a run on every prefix reproduces the full-run events up to it', () => {
+    const wave: Candle[] = Array.from({ length: 160 }, (_, t) => {
+      const c = 100 + 12 * Math.sin(t / 9) + 4 * Math.sin(t * 1.7);
+      return { t, o: c, h: c + 1.5, l: c - 1.5, c, v: 1 };
+    });
+    const params = { length: 20 };
+    const full = detectReclaimEvents(wave, params);
+    expect(full.length).toBeGreaterThan(2);
+    for (let k = 0; k < wave.length; k += 1) {
+      const prefix = detectReclaimEvents(wave.slice(0, k + 1), params);
+      expect(prefix).toEqual(full.filter((event) => (event.index as number) <= k));
+    }
+  });
+
+  it('settles on the first confirmed run, so a later start agrees from its first event on', () => {
+    const wave: Candle[] = Array.from({ length: 200 }, (_, t) => {
+      const c = 100 + 12 * Math.sin(t / 9) + 4 * Math.sin(t * 1.7);
+      return { t, o: c, h: c + 1.5, l: c - 1.5, c, v: 1 };
+    });
+    // With no buffer the ATR's own start-up cannot move a decision.
+    const params = { length: 20, atrMultiple: 0 };
+    const key = (event: { id: string; t?: number }) => `${event.id}@${event.t}`;
+    const full = detectReclaimEvents(wave, params).map(key);
+    for (let start = 1; start < 60; start += 1) {
+      const later = detectReclaimEvents(wave.slice(start), params);
+      expect(later.length).toBeGreaterThan(0);
+      const from = later[0].t as number;
+      expect(later.map(key)).toEqual(
+        detectReclaimEvents(wave, params).filter((event) => (event.t as number) >= from).map(key),
+      );
+    }
+    expect(full.length).toBeGreaterThan(2);
+  });
+
+  it('defaults to the 200-day, two closes, half an ATR', () => {
+    expect(detectReclaimEvents([], {})).toEqual([]);
+    const long: Candle[] = [
+      ...Array.from({ length: 220 }, (_, i) => 300 - i),
+      ...Array.from({ length: 120 }, (_, i) => 80 + i * 3),
+    ].map((c, t) => ({ t, o: c, h: c + 1, l: c - 1, c, v: 1 }));
+    const [reclaimed] = detectReclaimEvents(long);
+    expect(reclaimed?.id).toBe('sma.reclaimed');
+    expect(reclaimed?.payload).toMatchObject({ length: 200, confirmBars: 2, atrMultiple: 0.5, atrLength: 14 });
+    expect(reclaimed?.payload?.distanceAtr).toBeGreaterThanOrEqual(0.5);
+  });
+
+  it('refuses bad parameters', () => {
+    expect(() => detectReclaimEvents(candles, { confirmBars: 0 })).toThrow();
+    expect(() => detectReclaimEvents(candles, { atrMultiple: -1 })).toThrow(RangeError);
+    expect(() => detectReclaimEvents(candles, { length: 1.5 })).toThrow();
   });
 });
