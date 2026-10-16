@@ -167,6 +167,24 @@ describe('ADX', () => {
     expect(detectEvents(midClimb).find((e) => e.id.startsWith('adx.trend.'))?.id).toBe('adx.trend.faded');
   });
 
+  it('names the started side on the fade, with a strong-trend reversal shown as a DI cross between', () => {
+    // Up, then straight into a decline: the DIs cross at ADX ~62, then the chop fades it.
+    const vTop = wave(220, (t) => {
+      if (t < 40) {return 100 + 2 * Math.sin(t / 2);}
+      if (t < 100) {return 100 + (t - 40) * 1.5;}
+      if (t < 140) {return 190 - (t - 100) * 1.5;}
+      return 130 + 2 * Math.sin(t / 2);
+    });
+    const events = detectEvents(vTop);
+    const start = events.find((e) => e.id.startsWith('adx.trend.started.'));
+    const fade = events.find((e) => e.id === 'adx.trend.faded');
+    expect(start?.id).toBe('adx.trend.started.bullish');
+    expect(fade?.payload?.direction).toBe('bullish');
+    const reversal = events.find((e) => e.id === 'adx.di.cross.bearish'
+      && (e.index as number) > (start?.index as number) && (e.payload?.adx as number) >= 25);
+    expect(reversal).toBeDefined();
+  });
+
   it('does not start again while trending when ADX dips between the levels and recovers', () => {
     // Climb, pause, climb: ADX dips below 25 in the pause but stays above 20, then rises through 25 again.
     const stepped = wave(260, (t) => {

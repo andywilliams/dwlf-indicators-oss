@@ -77,7 +77,7 @@ export type AdxResult = {
 };
 
 export type AdxEventPayload = {
-  /** bullish when +DI is above -DI on the bar, bearish when below; faded carries the side it faded from. */
+  /** bullish when +DI is above -DI on the bar (the last side they were on, if equal), bearish when below. A fade carries the side its trend started on. */
   direction: 'bullish' | 'bearish';
   adx: number;
   /** ADX on the previous bar; absent on the first bar with an ADX value. */
@@ -115,11 +115,15 @@ export const getEventDefinitions = () => Object.values(ADX_EVENT_DEFINITIONS);
  * `adx.di.cross.*` fire when the DIs change sides while ADX is at or above
  * `crossMinAdx`; a bar where they are equal is on neither side.
  * Each event uses only bars up to the one it is stamped on. Runs that start on
- * different bars agree once the Wilder smoothing has forgotten its start (it
- * decays by about (1 - 1/length) per bar; 150 bars is ample at 14), so give the
- * detector history: a 400-bar daily window is plenty.
+ * different bars agree once two things have happened: the Wilder smoothing has
+ * forgotten its start (it decays by about (1 - 1/length) per bar), and ADX has
+ * since left the band between the levels (closing below `fadeLevel` or at or above
+ * `trendLevel` sets both runs' state the same way). So give the detector history;
+ * a 400-bar daily window leaves hundreds of bars for both.
  * `adx.trend.faded` names no side in its id (price is ranging again); its
- * payload `direction` is the side of the trend that faded.
+ * payload `direction` is the side the trend started on. A trend that reverses
+ * without ADX falling below `fadeLevel` (a V-top) shows as an `adx.di.cross.*`
+ * in between; the fade still names the trend that began.
  */
 export const detectEvents = (candles: Candle[], params?: AdxParams): IndicatorEvent<AdxEventPayload>[] => {
   const resolved = resolveAdxParams(params);
@@ -127,6 +131,7 @@ export const detectEvents = (candles: Candle[], params?: AdxParams): IndicatorEv
   const events: IndicatorEvent<AdxEventPayload>[] = [];
   // undefined: no ADX yet (or after a gap).
   let trending: boolean | undefined;
+  // The side the trend started on (or, for a trend under way at the first bar, the DIs' side there).
   let trendDirection: 'bullish' | 'bearish' = 'bullish';
   // The side the DIs were last on (+1 / -1), ignoring bars where they are equal.
   let diSide = 0;
