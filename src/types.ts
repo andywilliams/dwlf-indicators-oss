@@ -37,6 +37,17 @@ export type AtrParams = {
   episodeResetPercentile?: number;
 };
 
+export type AdxParams = {
+  /** Wilder smoothing period for the DIs and ADX. */
+  length?: number;
+  /** ADX level whose upward crossing starts a trend (`adx.trend.started.*`). */
+  trendLevel?: number;
+  /** ADX level below which a started trend has faded (`adx.trend.faded`); at most trendLevel. */
+  fadeLevel?: number;
+  /** DI crosses (`adx.di.cross.*`) fire only while ADX is at or above this. */
+  crossMinAdx?: number;
+};
+
 export type RsiParams = {
   /** Wilder smoothing period. */
   length?: number;
